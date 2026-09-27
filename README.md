@@ -1,5 +1,7 @@
 # Surogate Rune Python SDK
 
+![Surogate Rune — decisions from text, structured data and images](https://raw.githubusercontent.com/invergent-ai/rune-sdk-python/main/assets/rune-og.jpg)
+
 Python clients for the Surogate Rune decisions API, maintained by Invergent. Requires Python 3.10+.
 
 ## Install
