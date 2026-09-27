@@ -11,7 +11,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / ".github/scripts/release_notes.py
 def run_release_notes(tmp_path: Path, changelog: str, tag: str = "v1.2.3", version: str = "1.2.3") -> subprocess.CompletedProcess[str]:
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs/changelog.md").write_text(changelog)
-    return subprocess.run(  # noqa: S603 - Fixed interpreter and repository-owned script.
+    return subprocess.run(
         [sys.executable, str(SCRIPT), tag, version],
         cwd=tmp_path,
         env={**os.environ, "GITHUB_OUTPUT": str(tmp_path / "output")},

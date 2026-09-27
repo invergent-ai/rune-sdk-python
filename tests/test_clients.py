@@ -9,10 +9,8 @@ from pydantic import ValidationError
 from pydantic_core import from_json, to_json
 from typing_extensions import assert_type
 
-from tests.conftest import ClientFactory
-from tests.helpers import TrackingTransport, models, system_one
-from typesafe_sdk import (
-    AsyncTypeSafeClient,
+from rune_sdk import (
+    AsyncRuneClient,
     Choice,
     ChoiceAnswer,
     JSONValue,
@@ -21,26 +19,28 @@ from typesafe_sdk import (
     NoulAnswer,
     QuestionModel,
     Questions,
+    RuneAPIConnectionError,
+    RuneAPIError,
+    RuneAPIResponseValidationError,
+    RuneAPITimeoutError,
+    RuneAuthenticationError,
+    RuneBadRequestError,
+    RuneClient,
+    RuneError,
+    RuneInternalServerError,
+    RuneNotFoundError,
+    RunePermissionDeniedError,
+    RuneRateLimitError,
+    RuneUnprocessableEntityError,
     Score,
     ScoreAnswer,
-    TypeSafeAPIConnectionError,
-    TypeSafeAPIError,
-    TypeSafeAPIResponseValidationError,
-    TypeSafeAPITimeoutError,
-    TypeSafeAuthenticationError,
-    TypeSafeBadRequestError,
-    TypeSafeClient,
-    TypeSafeError,
-    TypeSafeInternalServerError,
-    TypeSafeNotFoundError,
-    TypeSafePermissionDeniedError,
-    TypeSafeRateLimitError,
-    TypeSafeUnprocessableEntityError,
     Usage,
 )
+from tests.conftest import ClientFactory
+from tests.helpers import TrackingTransport, decide, models
 
 RESULT = {
-    "model": "jev-latest",
+    "model": "rune-v3",
     "usage": {"input_tokens": 12, "output_tokens": 3},
     "answers": {
         "spam": {"type": "noul", "noul": 0.98},
@@ -54,15 +54,15 @@ RESULT = {
         },
     },
 }
-CARD = {"name": "jev-latest", "description": "Fast model", "release_date": "2026-08-01"}
+CARD = {"id": "rune-v3", "object": "model", "created": 0, "owned_by": "test"}
 
 
 @pytest.mark.parametrize("question_form", ["dataclass", "raw", "mixed"])
 async def test_round_trip(clients: ClientFactory, question_form: str) -> None:
     criteria: list[str | dict[str, JSONValue | None] | list[JSONValue | None]] = ["bad", "ok", "great"]
     raw: dict[str, QuestionModel] = {
-        "spam": {"type": "noul", "instructions": "Spam?"},
-        "tone": {"type": "choice", "instructions": "Tone?", "criteria": {"friendly": None, "hostile": None}},
+        "spam": {"type": "noul", "instructions": "Spam?", "criteria": {"true": "true", "false": "false"}},
+        "tone": {"type": "choice", "instructions": "Tone?", "criteria": {"friendly": "friendly", "hostile": "hostile"}},
         "quality": {"type": "score", "instructions": "Quality?", "criteria": criteria},
     }
     questions: Questions
@@ -76,22 +76,22 @@ async def test_round_trip(clients: ClientFactory, question_form: str) -> None:
         }
     expected: dict[str, JSONValue | None] = {
         "state": {"document": "Hello 🌍"},
-        "model": "jev-latest",
+        "model": "rune-v3",
         "questions": {
-            "spam": {"type": "noul", "instructions": "Spam?"},
-            "tone": {"type": "choice", "instructions": "Tone?", "criteria": {"friendly": None, "hostile": None}},
+            "spam": {"type": "noul", "instructions": "Spam?", "criteria": {"true": "true", "false": "false"}},
+            "tone": {"type": "choice", "instructions": "Tone?", "criteria": {"friendly": "friendly", "hostile": "hostile"}},
             "quality": {"type": "score", "instructions": "Quality?", "criteria": ["bad", "ok", "great"]},
         },
     }
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "POST"
-        assert str(request.url) == "https://api.typesafe.ai/v1/systemone"
+        assert str(request.url) == "https://rune.surogate.ai/v1/decisions"
         assert from_json(request.content) == expected
         assert request.headers["content-type"] == "application/json"
         return httpx2.Response(200, content=to_json(RESULT))
 
-    result = await system_one(
+    result = await decide(
         clients(handler),
         state={"document": "Hello 🌍"},
         questions=questions,
@@ -105,7 +105,7 @@ async def test_round_trip(clients: ClientFactory, question_form: str) -> None:
     assert result.nouls is result.nouls
     assert result.choices is result.choices
     assert result.scores is result.scores
-    assert result.model == "jev-latest"
+    assert result.model == "rune-v3"
     assert result.usage == Usage(input_tokens=12, output_tokens=3)
     assert set(result.nouls) == {"spam"}
     assert set(result.choices) == {"tone"}
@@ -130,7 +130,7 @@ async def test_extra_body_shallow_override(clients: ClientFactory) -> None:
     expected = {
         "state": "hi",
         "model": "override-model",
-        "questions": {"q": {"type": "noul", "instructions": "?"}},
+        "questions": {"q": {"type": "noul", "instructions": "?", "criteria": {"true": "true", "false": "false"}}},
         "beam_width": 4,
         "nullable": None,
     }
@@ -139,7 +139,7 @@ async def test_extra_body_shallow_override(clients: ClientFactory) -> None:
         assert from_json(request.content) == expected
         return httpx2.Response(200, content=to_json(RESULT))
 
-    await system_one(
+    await decide(
         clients(handler),
         state="hi",
         questions={"q": {"type": "noul", "instructions": "?"}},
@@ -152,8 +152,8 @@ async def test_unserializable_request_body_raises(clients: ClientFactory) -> Non
     def handler(request: httpx2.Request) -> httpx2.Response:
         pytest.fail("An unencodable request body reached the network")
 
-    with pytest.raises(TypeSafeError, match="could not be encoded as JSON"):
-        await system_one(
+    with pytest.raises(RuneError, match="could not be encoded as JSON"):
+        await decide(
             clients(handler),
             state="x",
             questions={"q": {"type": "noul", "instructions": "?"}},
@@ -168,16 +168,20 @@ async def test_raw_question_passthrough(clients: ClientFactory) -> None:
         {
             "q": {"type": "noul", "instructions": "Spam?", "weight": 3, "nested": {"k": None}},
             "choice": {"type": "choice", "criteria": {"a": None}, "weight": 2},
-            "score": {"type": "score", "criteria": ["good"], "weight": 1},
+            "score": {"type": "score", "criteria": ["bad", "good"], "weight": 1},
         },
     )
-    expected = {"state": "hi", "model": "jev-latest", "questions": questions}
+    expected = {"state": "hi", "model": "rune-v3", "questions": {
+        "q": {"type": "noul", "instructions": "Spam?", "weight": 3, "nested": {"k": None}, "criteria": {"true": "true", "false": "false"}},
+        "choice": {"type": "choice", "instructions": "", "criteria": {"a": "a"}, "weight": 2},
+        "score": {"type": "score", "instructions": "", "criteria": ["bad", "good"], "weight": 1},
+    }}
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         assert from_json(request.content) == expected
         return httpx2.Response(200, content=to_json(RESULT))
 
-    await system_one(clients(handler), state="hi", questions=questions)
+    await decide(clients(handler), state="hi", questions=questions)
 
 
 # Raw dictionary questions are passed through untouched: the SDK leaves their schema validation to
@@ -191,11 +195,13 @@ async def test_raw_question_passthrough(clients: ClientFactory) -> None:
 )
 async def test_question_schema_validation_is_left_to_api(clients: ClientFactory, question: Any) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
-        assert from_json(request.content)["questions"]["q"] == question
+        actual = from_json(request.content)["questions"]["q"]
+        for key, value in question.items():
+            assert actual[key] == value
         return httpx2.Response(422, json={"detail": "Invalid question"})
 
-    with pytest.raises(TypeSafeUnprocessableEntityError, match="Invalid question"):
-        await system_one(clients(handler), state="x", questions={"q": question})
+    with pytest.raises(RuneUnprocessableEntityError, match="Invalid question"):
+        await decide(clients(handler), state="x", questions={"q": question})
 
 
 async def test_rich_descriptions(clients: ClientFactory) -> None:
@@ -204,9 +210,9 @@ async def test_rich_descriptions(clients: ClientFactory) -> None:
         "state": "a ticket",
         "model": "custom",
         "questions": {
-            "duplicate": {"type": "noul", "instructions": {"question": "Duplicate?"}, "criteria": {"true": criteria}},
-            "team": {"type": "choice", "instructions": "Team?", "criteria": {"billing": criteria, "other": None}},
-            "risk": {"type": "score", "instructions": "Risk?", "criteria": [criteria]},
+            "duplicate": {"type": "noul", "instructions": {"question": "Duplicate?"}, "criteria": {"true": criteria, "false": "false"}},
+            "team": {"type": "choice", "instructions": "Team?", "criteria": {"billing": criteria, "other": "other"}},
+            "risk": {"type": "score", "instructions": "Risk?", "criteria": [criteria, "other"]},
         },
     }
 
@@ -223,7 +229,7 @@ async def test_rich_descriptions(clients: ClientFactory) -> None:
             },
         )
 
-    result = await system_one(
+    result = await decide(
         clients(handler),
         state="a ticket",
         model="custom",
@@ -237,7 +243,7 @@ async def test_rich_descriptions(clients: ClientFactory) -> None:
                 instructions="Team?",
                 criteria={"billing": {"summary": "duplicated", "examples": ["charged twice"]}, "other": None},
             ),
-            "risk": Score(instructions="Risk?", criteria=[{"summary": "duplicated", "examples": ["charged twice"]}]),
+            "risk": Score(instructions="Risk?", criteria=[{"summary": "duplicated", "examples": ["charged twice"]}, "other"]),
         },
     )
     assert result.scores["risk"].legend[0] == criteria
@@ -248,24 +254,24 @@ async def test_models_shape(clients: ClientFactory) -> None:
         assert request.method == "GET"
         assert request.url.path == "/v1/models"
         assert request.content == b""
-        return httpx2.Response(200, content=to_json({"models": [CARD]}))
+        return httpx2.Response(200, content=to_json({"data": [CARD]}))
 
     assert await models(clients(handler)) == (ModelMetadata(**CARD),)
 
 
 async def test_models_ignore_unknown_fields(clients: ClientFactory) -> None:
     card = {**CARD, "context_window": 128000, "pricing": None}
-    client = clients(lambda request: httpx2.Response(200, content=to_json({"models": [card]})))
-    response = await client.models.list() if isinstance(client, AsyncTypeSafeClient) else client.models.list()
+    client = clients(lambda request: httpx2.Response(200, content=to_json({"data": [card]})))
+    response = await client.models.list() if isinstance(client, AsyncRuneClient) else client.models.list()
     [model] = response.models
-    assert model.name == "jev-latest"
+    assert model.name == "rune-v3"
     # Unmodeled fields are dropped from the card but remain available via the raw response.
-    assert response.raw_http_response.json()["models"][0]["context_window"] == 128000
+    assert response.raw_http_response.json()["data"][0]["context_window"] == 128000
 
 
-@pytest.mark.parametrize("body", [None, {}, {"models": "bad"}, {"models": [{"name": "x"}]}])
+@pytest.mark.parametrize("body", [None, {}, {"data": "bad"}, {"data": [{"name": "x"}]}])
 async def test_invalid_models_response(clients: ClientFactory, body: object) -> None:
-    with pytest.raises(TypeSafeAPIResponseValidationError):
+    with pytest.raises(RuneAPIResponseValidationError):
         await models(clients(lambda request: httpx2.Response(200, json=body)))
 
 
@@ -273,46 +279,46 @@ async def test_invalid_models_response(clients: ClientFactory, body: object) -> 
     "questions,match",
     [
         ({}, "At least one question"),
-        ({"rating": Score(instructions="?", criteria=[])}, '"rating" has no criteria'),
+        ({"rating": Score(instructions="?", criteria=[])}, '"rating" has fewer than two criteria'),
     ],
 )
 async def test_validation_before_network(clients: ClientFactory, questions: Any, match: str) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         pytest.fail("Invalid questions reached the network")
 
-    with pytest.raises(TypeSafeError, match=match):
-        await system_one(clients(handler), state="x", questions=questions)
+    with pytest.raises(RuneError, match=match):
+        await decide(clients(handler), state="x", questions=questions)
 
 
 @pytest.mark.parametrize(
     "status,error",
     [
-        (400, TypeSafeBadRequestError),
-        (401, TypeSafeAuthenticationError),
-        (403, TypeSafePermissionDeniedError),
-        (404, TypeSafeNotFoundError),
-        (422, TypeSafeUnprocessableEntityError),
-        (429, TypeSafeRateLimitError),
-        (500, TypeSafeInternalServerError),
-        (503, TypeSafeInternalServerError),
-        (408, TypeSafeAPIError),
-        (409, TypeSafeAPIError),
-        (302, TypeSafeAPIError),
+        (400, RuneBadRequestError),
+        (401, RuneAuthenticationError),
+        (403, RunePermissionDeniedError),
+        (404, RuneNotFoundError),
+        (422, RuneUnprocessableEntityError),
+        (429, RuneRateLimitError),
+        (500, RuneInternalServerError),
+        (503, RuneInternalServerError),
+        (408, RuneAPIError),
+        (409, RuneAPIError),
+        (302, RuneAPIError),
     ],
 )
-async def test_error_mapping(clients: ClientFactory, status: int, error: type[TypeSafeAPIError]) -> None:
+async def test_error_mapping(clients: ClientFactory, status: int, error: type[RuneAPIError]) -> None:
     body = {"detail": {"message": "Server explanation"}}
     with pytest.raises(error) as caught:
         await models(
-            clients(lambda request: httpx2.Response(status, json=body, headers={"x-typesafe-request-id": "req_123", "retry-after-ms": "125"}))
+            clients(lambda request: httpx2.Response(status, json=body, headers={"x-request-id": "req_123", "retry-after-ms": "125"}))
         )
     assert type(caught.value) is error
     assert caught.value.status == status
     assert caught.value.body == body
     assert caught.value.request_id == "req_123"
-    assert str(caught.value) == f"GET https://api.typesafe.ai/v1/models: {status} Server explanation (request_id=req_123)"
+    assert str(caught.value) == f"GET https://rune.surogate.ai/v1/models: {status} Server explanation (request_id=req_123)"
     assert caught.value.headers["retry-after-ms"] == "125"
-    if isinstance(caught.value, TypeSafeRateLimitError):
+    if isinstance(caught.value, RuneRateLimitError):
         assert caught.value.retry_after_ms == 125
 
 
@@ -334,23 +340,23 @@ async def test_error_mapping(clients: ClientFactory, status: int, error: type[Ty
 )
 async def test_error_messages(clients: ClientFactory, body: object, message: str) -> None:
     content = body.encode() if isinstance(body, str) else to_json(body)
-    with pytest.raises(TypeSafeAPIError, match="400") as caught:
+    with pytest.raises(RuneAPIError, match="400") as caught:
         await models(clients(lambda request: httpx2.Response(400, content=content)))
-    assert str(caught.value) == f"GET https://api.typesafe.ai/v1/models: 400 {message}"
+    assert str(caught.value) == f"GET https://rune.surogate.ai/v1/models: 400 {message}"
 
 
 @pytest.mark.parametrize(
     "transport_error,sdk_error",
     [
-        (httpx2.LocalProtocolError, TypeSafeAPIConnectionError),
-        (httpx2.ConnectError, TypeSafeAPIConnectionError),
-        (httpx2.ReadError, TypeSafeAPIConnectionError),
-        (httpx2.RemoteProtocolError, TypeSafeAPIConnectionError),
-        (httpx2.ConnectTimeout, TypeSafeAPITimeoutError),
-        (httpx2.ReadTimeout, TypeSafeAPITimeoutError),
+        (httpx2.LocalProtocolError, RuneAPIConnectionError),
+        (httpx2.ConnectError, RuneAPIConnectionError),
+        (httpx2.ReadError, RuneAPIConnectionError),
+        (httpx2.RemoteProtocolError, RuneAPIConnectionError),
+        (httpx2.ConnectTimeout, RuneAPITimeoutError),
+        (httpx2.ReadTimeout, RuneAPITimeoutError),
     ],
 )
-async def test_transport_errors(clients: ClientFactory, transport_error: type[httpx2.RequestError], sdk_error: type[TypeSafeError]) -> None:
+async def test_transport_errors(clients: ClientFactory, transport_error: type[httpx2.RequestError], sdk_error: type[RuneError]) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         raise transport_error("failed", request=request)
 
@@ -360,12 +366,12 @@ async def test_transport_errors(clients: ClientFactory, transport_error: type[ht
     assert isinstance(caught.value.__cause__, transport_error)
     assert str(caught.value.__cause__) == "failed"
     assert caught.value.__context__ is None
-    if isinstance(caught.value, TypeSafeAPITimeoutError):
+    if isinstance(caught.value, RuneAPITimeoutError):
         assert caught.value.timeout == 1.25
 
 
 @pytest.mark.parametrize("timeout", [None, 2.0, httpx2.Timeout(3.0, read=9.0), httpx2.Timeout(None)])
-async def test_system_one_timeout_override(clients: ClientFactory, timeout: float | httpx2.Timeout | None) -> None:
+async def test_decide_timeout_override(clients: ClientFactory, timeout: float | httpx2.Timeout | None) -> None:
     requests: list[httpx2.Request] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -373,8 +379,8 @@ async def test_system_one_timeout_override(clients: ClientFactory, timeout: floa
         return httpx2.Response(200, json=RESULT)
 
     client = clients(handler, timeout=7.0)
-    await system_one(client, state="hello", questions={"q": Noul(instructions="?")}, timeout=timeout)
-    await system_one(client, state="hello", questions={"q": Noul(instructions="?")})
+    await decide(client, state="hello", questions={"q": Noul(instructions="?")}, timeout=timeout)
+    await decide(client, state="hello", questions={"q": Noul(instructions="?")})
     expected = httpx2.Timeout(7.0 if timeout is None else timeout).as_dict()
     assert requests[0].extensions["timeout"] == expected
     assert requests[1].extensions["timeout"] == httpx2.Timeout(7.0).as_dict()
@@ -385,37 +391,37 @@ async def test_headers_timeout_and_logging(clients: ClientFactory, caplog: pytes
         "authorization": "injected-secret",
         "accept": "text/plain",
         "user-agent": "wrong",
-        "x-typesafe-sdk": "wrong",
-        "x-typesafe-runtime": "wrong",
+        "x-rune-sdk": "wrong",
+        "x-rune-runtime": "wrong",
     }
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        assert str(request.url) == "https://example.test/prefix/v1/systemone"
+        assert str(request.url) == "https://example.test/prefix/v1/decisions"
         assert request.headers["authorization"] == "Bearer test-key"
         assert request.headers["accept"] == "application/json"
-        assert request.headers["user-agent"] == f"typesafe-sdk/{version('typesafe-sdk')}"
-        assert request.headers["x-typesafe-sdk"] == request.headers["user-agent"]
-        assert request.headers["x-typesafe-runtime"].startswith("python/")
-        assert "x-typesafe-retry-count" not in request.headers
+        assert request.headers["user-agent"] == f"rune-sdk/{version('rune-sdk')}"
+        assert request.headers["x-rune-sdk"] == request.headers["user-agent"]
+        assert request.headers["x-rune-runtime"].startswith("python/")
+        assert "x-rune-retry-count" not in request.headers
         assert request.headers["x-team"] == "call"
         assert request.headers["x-default"] == "kept"
         assert request.headers["content-type"] == "application/json"
         assert request.extensions["timeout"] == {"connect": 2.0, "read": 2.0, "write": 2.0, "pool": 2.0}
-        return httpx2.Response(200, json=RESULT, headers={"set-cookie": "response-secret", "x-typesafe-request-id": "req_log"})
+        return httpx2.Response(200, json=RESULT, headers={"set-cookie": "response-secret", "x-request-id": "req_log"})
 
-    with caplog.at_level(logging.DEBUG, logger="typesafe_sdk"):
+    with caplog.at_level(logging.DEBUG, logger="rune_sdk"):
         client = clients(
             handler,
             base_url="https://example.test/prefix///",
             timeout=7,
             headers={**protected, "X-Team": "default", "X-Default": "kept", "X-API-Key": "key-secret", "cookie": "cookie-secret"},
         )
-        await system_one(
+        await decide(
             client,
             state="hello",
             questions={"q": {"type": "noul", "instructions": "?"}},
             timeout=2.0,
-            extra_headers={**protected, "x-team": "call", "x-typesafe-retry-count": "99", "content-type": "wrong"},
+            extra_headers={**protected, "x-team": "call", "x-rune-retry-count": "99", "content-type": "wrong"},
         )
     for secret in ("test-key", "injected-secret", "key-secret", "cookie-secret", "response-secret"):
         assert secret not in caplog.text
@@ -430,26 +436,26 @@ async def test_http_client_settings(clients: ClientFactory) -> None:
         requests.append(request)
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        assert str(request.url).startswith("https://api.typesafe.ai/v1/")
+        assert str(request.url).startswith("https://rune.surogate.ai/v1/")
         assert request.headers["authorization"] == "Bearer test-key"
         assert request.headers["accept"] == "application/json"
-        assert request.headers["user-agent"].startswith("typesafe-sdk/")
-        assert request.headers["x-typesafe-sdk"] == request.headers["user-agent"]
-        assert request.headers["x-typesafe-runtime"].startswith("python/")
+        assert request.headers["user-agent"].startswith("rune-sdk/")
+        assert request.headers["x-rune-sdk"] == request.headers["user-agent"]
+        assert request.headers["x-rune-runtime"].startswith("python/")
         assert request.headers["x-http-default"] == "kept"
         assert request.headers["x-sdk-default"] == "sdk"
         assert request.headers["x-call"] == "call"
         if request.method == "POST":
             assert request.headers["content-type"] == "application/json"
-        return httpx2.Response(200, json=RESULT if request.method == "POST" else {"models": []})
+        return httpx2.Response(200, json=RESULT if request.method == "POST" else {"data": []})
 
     headers = {
         "authorization": "wrong",
         "accept": "text/plain",
         "content-type": "text/plain",
         "user-agent": "wrong",
-        "x-typesafe-sdk": "wrong",
-        "x-typesafe-runtime": "wrong",
+        "x-rune-sdk": "wrong",
+        "x-rune-runtime": "wrong",
         "x-http-default": "kept",
         "x-sdk-default": "http",
         "x-call": "http",
@@ -476,7 +482,7 @@ async def test_http_client_settings(clients: ClientFactory) -> None:
     client = clients(handler, http_client=http_client, headers={"x-sdk-default": "sdk", "x-call": "sdk"})
     assert client._http_client is http_client
     assert await models(client, extra_headers={"x-call": "call"}) == ()
-    await system_one(client, state="x", questions={"q": Noul(instructions="?")}, extra_headers={"x-call": "call"})
+    await decide(client, state="x", questions={"q": Noul(instructions="?")}, extra_headers={"x-call": "call"})
     assert [request.method for request in requests] == ["GET", "POST"]
     assert http_client.headers == original_headers
     assert http_client.base_url == original_base_url
@@ -486,9 +492,9 @@ async def test_http_client_settings(clients: ClientFactory) -> None:
 @pytest.mark.parametrize("supply_http_client", [False, True])
 async def test_supplied_network_resources_closed(clients: ClientFactory, use_context: bool, supply_http_client: bool) -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
-        assert str(request.url) == "https://api.typesafe.ai/v1/models"
+        assert str(request.url) == "https://rune.surogate.ai/v1/models"
         assert request.headers["authorization"] == "Bearer test-key"
-        return httpx2.Response(200, json={"models": []})
+        return httpx2.Response(200, json={"data": []})
 
     transport = TrackingTransport(handler)
     if supply_http_client:
@@ -498,7 +504,7 @@ async def test_supplied_network_resources_closed(clients: ClientFactory, use_con
     else:
         client = clients(handler, transport=transport)
     assert await models(client) == ()
-    if isinstance(client, AsyncTypeSafeClient):
+    if isinstance(client, AsyncRuneClient):
         if use_context:
             async with client:
                 assert (await client.models.list()).models == ()
@@ -522,13 +528,13 @@ async def test_supplied_network_resources_closed(clients: ClientFactory, use_con
 
 
 async def test_owned_http_client_closed() -> None:
-    with TypeSafeClient(api_key="test") as client:
+    with RuneClient(api_key="test") as client:
         assert not client._http_client.is_closed
-        assert client._http_client.timeout == httpx2.Timeout(10.0)
+        assert client._http_client.timeout == httpx2.Timeout(120.0)
     assert client._http_client.is_closed
-    async with AsyncTypeSafeClient(api_key="test") as async_client:
+    async with AsyncRuneClient(api_key="test") as async_client:
         assert not async_client._http_client.is_closed
-        assert async_client._http_client.timeout == httpx2.Timeout(10.0)
+        assert async_client._http_client.timeout == httpx2.Timeout(120.0)
     assert async_client._http_client.is_closed
 
 
@@ -543,8 +549,8 @@ async def test_exceptional_context_closes_http_client(clients: ClientFactory, ki
     http_client = httpx2.AsyncClient(transport=transport) if clients.async_mode else httpx2.Client(transport=transport)
     client = clients(handler, http_client=http_client)
     assert client._http_client is http_client
-    with pytest.raises(kind) as caught:  # noqa: PT012 - Exercise context-manager cleanup while propagating the exception.
-        if isinstance(client, AsyncTypeSafeClient):
+    with pytest.raises(kind) as caught:
+        if isinstance(client, AsyncRuneClient):
             async with client:
                 await client.models.list()
         else:
@@ -565,11 +571,11 @@ async def test_task_cancellation_closes_context() -> None:
         raise AssertionError("Cancelled request returned")
 
     transport = TrackingTransport(handler)
-    client = AsyncTypeSafeClient(api_key="test", http_client=httpx2.AsyncClient(transport=transport))
+    client = AsyncRuneClient(api_key="test", http_client=httpx2.AsyncClient(transport=transport))
 
     async def run() -> None:
         async with client:
-            await client.system_one("x", {"q": Noul(instructions="?")})
+            await client.decide("x", {"q": Noul(instructions="?")})
 
     task = asyncio.create_task(run())
     try:
@@ -590,7 +596,7 @@ async def test_cancellation_propagates() -> None:
         attempts += 1
         raise asyncio.CancelledError
 
-    async with AsyncTypeSafeClient(api_key="test", http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler))) as client:
+    async with AsyncRuneClient(api_key="test", http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler))) as client:
         with pytest.raises(asyncio.CancelledError):
             await client.models.list()
     assert attempts == 1

@@ -8,22 +8,22 @@ from pydantic import ValidationError
 from pydantic_core import from_json
 from typing_extensions import assert_type
 
-from tests.conftest import ClientFactory
-from tests.helpers import system_one
-from tests.test_clients import RESULT
-from typesafe_sdk import (
+from rune_sdk import (
     Answer,
-    AsyncTypeSafeClient,
+    AsyncRuneClient,
     ChoiceAnswer,
+    DecisionsResponse,
     ListModelsResponse,
     ModelMetadata,
     NoulAnswer,
+    RuneAPIResponseValidationError,
+    RuneError,
     ScoreAnswer,
-    SystemOneResponse,
-    TypeSafeAPIResponseValidationError,
-    TypeSafeError,
     Usage,
 )
+from tests.conftest import ClientFactory
+from tests.helpers import decide
+from tests.test_clients import RESULT
 
 
 @pytest.mark.parametrize(
@@ -45,32 +45,32 @@ async def test_malformed_response_raises_validation_error(clients: ClientFactory
         body["model"] = "test"
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(200, json=body, headers={"x-typesafe-request-id": "req-123"})
+        return httpx2.Response(200, json=body, headers={"x-request-id": "req-123"})
 
-    with pytest.raises(TypeSafeAPIResponseValidationError) as caught:
-        await system_one(clients(handler), state="x", questions={"q": {"type": "noul", "instructions": "?"}})
+    with pytest.raises(RuneAPIResponseValidationError) as caught:
+        await decide(clients(handler), state="x", questions={"q": {"type": "noul", "instructions": "?"}})
     assert caught.value.field_path == field_path
     assert caught.value.status == 200
     assert caught.value.request_id == "req-123"
     assert caught.value.body == body
     assert str(caught.value) == (
-        f"POST https://api.typesafe.ai/v1/systemone: 200 Invalid response data at {field_path!r}. (request_id=req-123)"
+        f"POST https://rune.surogate.ai/v1/decisions: 200 Invalid response data at {field_path!r}. (request_id=req-123)"
     )
 
 
-@pytest.mark.parametrize("missing", ["name", "description", "release_date"])
+@pytest.mark.parametrize("missing", ["id", "created", "owned_by"])
 def test_nested_missing_field_path(missing: str) -> None:
-    model = {"name": "test", "description": "Test model", "release_date": "2026-09-14"}
-    body = {"models": [model, {name: value for name, value in model.items() if name != missing}]}
-    with pytest.raises(TypeSafeAPIResponseValidationError) as caught:
+    model = {"id": "test", "object": "model", "created": 0, "owned_by": "test"}
+    body = {"data": [model, {name: value for name, value in model.items() if name != missing}]}
+    with pytest.raises(RuneAPIResponseValidationError) as caught:
         ListModelsResponse.from_http_response(httpx2.Response(200, json=body))
-    assert caught.value.field_path == f"models[1].{missing}"
-    assert str(caught.value) == f"200 Invalid response data at 'models[1].{missing}'."
+    assert caught.value.field_path == f"data[1].{missing}"
+    assert str(caught.value) == f"200 Invalid response data at 'data[1].{missing}'."
 
 
 async def test_response_carries_request_id(clients: ClientFactory) -> None:
-    result = await system_one(
-        clients(lambda request: httpx2.Response(200, json=RESULT, headers={"x-typesafe-request-id": "req-42"})),
+    result = await decide(
+        clients(lambda request: httpx2.Response(200, json=RESULT, headers={"x-request-id": "req-42"})),
         state="text",
         questions={"q": {"type": "noul", "instructions": "?"}},
     )
@@ -78,26 +78,26 @@ async def test_response_carries_request_id(clients: ClientFactory) -> None:
 
 
 async def test_response_carries_raw_http_response(clients: ClientFactory) -> None:
-    result = await system_one(
-        clients(lambda request: httpx2.Response(200, json=RESULT, headers={"x-typesafe-request-id": "req-42"})),
+    result = await decide(
+        clients(lambda request: httpx2.Response(200, json=RESULT, headers={"x-request-id": "req-42"})),
         state="text",
         questions={"q": {"type": "noul", "instructions": "?"}},
     )
     assert result.raw_http_response.status_code == 200
-    assert result.raw_http_response.headers["x-typesafe-request-id"] == "req-42"
+    assert result.raw_http_response.headers["x-request-id"] == "req-42"
     assert result.raw_http_response.json() == RESULT
 
 
-@pytest.mark.parametrize("resource", ["models", "system_one"])
+@pytest.mark.parametrize("resource", ["models", "decide"])
 async def test_response_serialization_excludes_http_metadata(clients: ClientFactory, resource: str) -> None:
-    body = {"models": [{"name": "test", "description": "Test model", "release_date": "2026-09-14"}]} if resource == "models" else RESULT
-    client = clients(lambda request: httpx2.Response(200, json=body, headers={"x-typesafe-request-id": "req-export"}))
+    body = {"data": [{"id": "test", "object": "model", "created": 0, "owned_by": "test"}]} if resource == "models" else RESULT
+    client = clients(lambda request: httpx2.Response(200, json=body, headers={"x-request-id": "req-export"}))
     if resource == "models":
-        result = await client.models.list() if isinstance(client, AsyncTypeSafeClient) else client.models.list()
+        result = await client.models.list() if isinstance(client, AsyncRuneClient) else client.models.list()
     else:
-        result = await system_one(client, state="text", questions={"q": {"type": "noul", "instructions": "?"}})
+        result = await decide(client, state="text", questions={"q": {"type": "noul", "instructions": "?"}})
     # Populating derived views must not add them to the serialized API payload.
-    if isinstance(result, SystemOneResponse):
+    if isinstance(result, DecisionsResponse):
         assert result.choices
         assert result.scores
     assert result.request_id == "req-export"
@@ -110,9 +110,9 @@ async def test_response_serialization_excludes_http_metadata(clients: ClientFact
 
 
 def test_copied_response_preserves_metadata() -> None:
-    result = SystemOneResponse.from_http_response(httpx2.Response(200, json=RESULT, headers={"x-typesafe-request-id": "req-copy"}))
+    result = DecisionsResponse.from_http_response(httpx2.Response(200, json=RESULT, headers={"x-request-id": "req-copy"}))
     assert result.scores
-    unpickled = pickle.loads(pickle.dumps(result))  # noqa: S301 - Round-tripping an object created in this test.
+    unpickled = pickle.loads(pickle.dumps(result))
     for restored in (copy.copy(result), copy.deepcopy(result), unpickled):
         assert restored is not result
         assert restored == result
@@ -122,18 +122,18 @@ def test_copied_response_preserves_metadata() -> None:
 
 
 def test_missing_raw_raises_on_access() -> None:
-    result = SystemOneResponse(model="test", usage=Usage(), answers={})
-    with pytest.raises(TypeSafeError, match="raw HTTP response"):
+    result = DecisionsResponse(model="test", usage=Usage(), answers={})
+    with pytest.raises(RuneError, match="raw HTTP response"):
         _ = result.raw_http_response
 
 
 async def test_missing_request_id_raises_on_access(clients: ClientFactory) -> None:
-    result = await system_one(
+    result = await decide(
         clients(lambda request: httpx2.Response(200, json=RESULT)),
         state="text",
         questions={"q": {"type": "noul", "instructions": "?"}},
     )
-    with pytest.raises(TypeSafeError, match="request ID"):
+    with pytest.raises(RuneError, match="request ID"):
         _ = result.request_id
 
 
@@ -143,14 +143,14 @@ async def test_unknown_extra_fields_tolerated(clients: ClientFactory) -> None:
         "usage": {"input_tokens": 1, "output_tokens": 1, "reasoning_tokens": 9, "billing_units": 1},
         "answers": {"spam": {"type": "noul", "noul": 0.9, "explanation": "spammy"}},
     }
-    result = await system_one(
+    result = await decide(
         clients(lambda request: httpx2.Response(200, json=body)),
         state="x",
         questions={"q": {"type": "noul", "instructions": "?"}},
     )
     assert result.nouls["spam"].noul == 0.9
     assert not hasattr(result.usage, "billing_units")
-    assert result.usage.model_dump() == {"input_tokens": 1, "output_tokens": 1}
+    assert result.usage.model_dump() == {"input_tokens": 1, "output_tokens": 1, "reasoning_tokens": 9}
     assert result.raw_http_response.json() == body
 
 
@@ -163,8 +163,8 @@ async def test_unknown_answer_type_ignored(clients: ClientFactory) -> None:
             "mystery": {"type": "aurora", "value": 3},
         },
     }
-    result = await system_one(
-        clients(lambda request: httpx2.Response(200, json=body, headers={"x-typesafe-request-id": "req-9"})),
+    result = await decide(
+        clients(lambda request: httpx2.Response(200, json=body, headers={"x-request-id": "req-9"})),
         state="text",
         questions={"q": {"type": "noul", "instructions": "?"}},
     )
@@ -182,7 +182,7 @@ def test_response_preserves_nested_json() -> None:
         legend={0: {"examples": ["a", {"note": None}]}},
         probabilities={0: 1.0},
     )
-    result = SystemOneResponse(
+    result = DecisionsResponse(
         model="test",
         usage=Usage(input_tokens=1, output_tokens=1),
         answers={"q": original},
@@ -238,9 +238,9 @@ def test_answer_attributes_and_dictionary_types() -> None:
         (ChoiceAnswer, {"choice": "a", "confidence": 1.0, "probabilities": {"a": 1.0}}),
         (ScoreAnswer, {"score": 0.0, "confidence": 1.0, "legend": {0: "bad"}, "probabilities": {0: 1.0}}),
         (Usage, {}),
-        (SystemOneResponse, {"model": "test", "usage": Usage()}),
-        (ModelMetadata, {"name": "test", "description": "Test model", "release_date": "2026-09-14"}),
-        (ListModelsResponse, {"models": ()}),
+        (DecisionsResponse, {"model": "test", "usage": Usage()}),
+        (ModelMetadata, {"id": "test", "object": "model", "created": 0, "owned_by": "test"}),
+        (ListModelsResponse, {"data": ()}),
     ],
 )
 def test_public_response_types_ignore_unknown_fields(model_type: Any, kwargs: dict[str, Any]) -> None:
@@ -267,7 +267,7 @@ def test_answer_fields_are_frozen(answer: Answer) -> None:
 
 @pytest.mark.parametrize("group", ["nouls", "choices", "scores"])
 def test_answer_groups_are_cached_and_not_serialized(group: str) -> None:
-    result = SystemOneResponse(model="test", usage=Usage(), answers={})
+    result = DecisionsResponse(model="test", usage=Usage(), answers={})
     cached = getattr(result, group)
     # The derived view is memoized (stable identity) and never leaks into the serialized payload.
     assert getattr(result, group) is cached

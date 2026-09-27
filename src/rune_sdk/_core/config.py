@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 
 import httpx2
 
-from typesafe_sdk._core.errors import TypeSafeError
-from typesafe_sdk.constants import (
+from rune_sdk._core.errors import RuneError
+from rune_sdk.constants import (
     API_KEY_ENV,
     BASE_URL_ENV,
     DEFAULT_BASE_URL,
@@ -27,15 +27,15 @@ def resolve_and_validate_api_key(api_key: str | None) -> str:
     """Resolve an API key from the argument or environment, strip whitespace, and validate it."""
     key = _resolve_string(api_key, API_KEY_ENV).strip()
     if not key:
-        raise TypeSafeError(f"No API key was provided. Pass api_key or set the {API_KEY_ENV} environment variable.")
+        raise RuneError(f"No API key was provided. Pass api_key or set the {API_KEY_ENV} environment variable.")
     if not key.isascii() or not key.isprintable() or " " in key:
-        raise TypeSafeError("API key must contain only printable ASCII characters without whitespace.")
+        raise RuneError("API key must contain only printable ASCII characters without whitespace.")
     return key
 
 
 def resolve_timeout(timeout: float | httpx2.Timeout) -> float | httpx2.Timeout:
     if not isinstance(timeout, httpx2.Timeout) and (not math.isfinite(timeout) or timeout <= 0):
-        raise TypeSafeError("timeout must be a positive, finite number of seconds.")
+        raise RuneError("timeout must be a positive, finite number of seconds.")
     return timeout
 
 

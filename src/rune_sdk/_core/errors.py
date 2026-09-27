@@ -9,8 +9,13 @@ from typing import Any
 import httpx2
 from typing_extensions import override
 
-from typesafe_sdk._core.constants import MAX_ERROR_BODY_LENGTH, REQUEST_ID_HEADER, RETRY_AFTER_HEADER, RETRY_AFTER_MS_HEADER
-from typesafe_sdk._core.json import serialize
+from rune_sdk._core.constants import (
+    MAX_ERROR_BODY_LENGTH,
+    REQUEST_ID_HEADER,
+    RETRY_AFTER_HEADER,
+    RETRY_AFTER_MS_HEADER,
+)
+from rune_sdk._core.json import serialize
 
 
 def parse_retry_after(headers: httpx2.Headers) -> float | None:
@@ -65,11 +70,11 @@ def extract_message(body: Any) -> str | None:
     return None
 
 
-class TypeSafeError(Exception):
+class RuneError(Exception):
     """Base exception for SDK failures."""
 
 
-class TypeSafeAPIError(TypeSafeError):
+class RuneAPIError(RuneError):
     """An unsuccessful HTTP response with its body and request metadata."""
 
     def __init__(self, status: int, body: Any, headers: httpx2.Headers, message: str | None = None, endpoint: str | None = None) -> None:
@@ -111,31 +116,31 @@ class TypeSafeAPIError(TypeSafeError):
 
     @property
     def request_id(self) -> str | None:
-        """The `x-typesafe-request-id` response header, or `None` if absent."""
+        """The `x-request-id` response header, or `None` if absent."""
         return self.headers.get(REQUEST_ID_HEADER)
 
 
-class TypeSafeBadRequestError(TypeSafeAPIError):
+class RuneBadRequestError(RuneAPIError):
     """The request was invalid (400)."""
 
 
-class TypeSafeAuthenticationError(TypeSafeAPIError):
+class RuneAuthenticationError(RuneAPIError):
     """Authentication failed (401)."""
 
 
-class TypeSafePermissionDeniedError(TypeSafeAPIError):
+class RunePermissionDeniedError(RuneAPIError):
     """Access was denied (403)."""
 
 
-class TypeSafeNotFoundError(TypeSafeAPIError):
+class RuneNotFoundError(RuneAPIError):
     """The resource was not found (404)."""
 
 
-class TypeSafeUnprocessableEntityError(TypeSafeAPIError):
+class RuneUnprocessableEntityError(RuneAPIError):
     """The request failed server validation (422)."""
 
 
-class TypeSafeRateLimitError(TypeSafeAPIError):
+class RuneRateLimitError(RuneAPIError):
     """The rate limit was exceeded (429)."""
 
     def __init__(self, status: int, body: object, headers: httpx2.Headers, message: str | None = None, endpoint: str | None = None) -> None:
@@ -145,15 +150,15 @@ class TypeSafeRateLimitError(TypeSafeAPIError):
         """The server's requested wait in milliseconds, or `None` if unavailable."""
 
 
-class TypeSafeInternalServerError(TypeSafeAPIError):
+class RuneInternalServerError(RuneAPIError):
     """The server failed to process the request (5xx)."""
 
 
-class TypeSafeAPIConnectionError(TypeSafeError, ConnectionError):
+class RuneAPIConnectionError(RuneError, ConnectionError):
     """A request failed without an HTTP response."""
 
 
-class TypeSafeAPITimeoutError(TypeSafeAPIConnectionError, TimeoutError):
+class RuneAPITimeoutError(RuneAPIConnectionError, TimeoutError):
     """A request exceeded its configured timeout."""
 
     def __init__(self, timeout: float | httpx2.Timeout) -> None:
@@ -173,7 +178,7 @@ class TypeSafeAPITimeoutError(TypeSafeAPIConnectionError, TimeoutError):
         return f"{type(self).__name__}({str(self)!r})"
 
 
-class TypeSafeAPIResponseValidationError(TypeSafeAPIError):
+class RuneAPIResponseValidationError(RuneAPIError):
     """A successful HTTP response whose body was missing or structurally invalid required data."""
 
     def __init__(self, status: int, body: Any, headers: httpx2.Headers, field_path: str, endpoint: str | None = None) -> None:
@@ -185,16 +190,16 @@ class TypeSafeAPIResponseValidationError(TypeSafeAPIError):
         self.args = (status, body, headers, field_path, endpoint)
 
 
-STATUS_ERROR_TYPES: dict[int, type[TypeSafeAPIError]] = {
-    400: TypeSafeBadRequestError,
-    401: TypeSafeAuthenticationError,
-    403: TypeSafePermissionDeniedError,
-    404: TypeSafeNotFoundError,
-    422: TypeSafeUnprocessableEntityError,
-    429: TypeSafeRateLimitError,
+STATUS_ERROR_TYPES: dict[int, type[RuneAPIError]] = {
+    400: RuneBadRequestError,
+    401: RuneAuthenticationError,
+    403: RunePermissionDeniedError,
+    404: RuneNotFoundError,
+    422: RuneUnprocessableEntityError,
+    429: RuneRateLimitError,
 }
 
 
-def api_error(status: int, body: object, headers: httpx2.Headers, endpoint: str | None = None) -> TypeSafeAPIError:
-    error_type = STATUS_ERROR_TYPES.get(status, TypeSafeInternalServerError if status >= HTTPStatus.INTERNAL_SERVER_ERROR else TypeSafeAPIError)
+def api_error(status: int, body: object, headers: httpx2.Headers, endpoint: str | None = None) -> RuneAPIError:
+    error_type = STATUS_ERROR_TYPES.get(status, RuneInternalServerError if status >= HTTPStatus.INTERNAL_SERVER_ERROR else RuneAPIError)
     return error_type(status, body, headers, endpoint=endpoint)

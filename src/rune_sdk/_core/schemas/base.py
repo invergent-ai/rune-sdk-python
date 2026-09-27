@@ -8,9 +8,9 @@ import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
 from typing_extensions import Self
 
-from typesafe_sdk._core.constants import REQUEST_ID_HEADER
-from typesafe_sdk._core.errors import TypeSafeAPIResponseValidationError, TypeSafeError, api_error
-from typesafe_sdk._core.json import deserialize
+from rune_sdk._core.constants import REQUEST_ID_HEADER
+from rune_sdk._core.errors import RuneAPIResponseValidationError, RuneError, api_error
+from rune_sdk._core.json import deserialize
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
@@ -53,9 +53,9 @@ def _request_endpoint(response: httpx2.Response) -> str | None:
     return f"{request.method} {request.url.copy_with(userinfo=b'', query=None, fragment=None)}"
 
 
-def validation_error(response: httpx2.Response, path: str) -> TypeSafeAPIResponseValidationError:
-    """Build a `TypeSafeAPIResponseValidationError` locating a bad field in `response`."""
-    return TypeSafeAPIResponseValidationError(
+def validation_error(response: httpx2.Response, path: str) -> RuneAPIResponseValidationError:
+    """Build a `RuneAPIResponseValidationError` locating a bad field in `response`."""
+    return RuneAPIResponseValidationError(
         response.status_code, deserialize(response.content), response.headers, path, _request_endpoint(response)
     )
 
@@ -67,8 +67,8 @@ class _ResponseMixin:
     def from_http_response(cls, response: httpx2.Response) -> Self:
         """Parse an HTTP response into this response type, attaching the raw response.
 
-        A non-success status raises the matching `TypeSafeAPIError`; a body that does not
-        match the schema raises a `TypeSafeAPIResponseValidationError`.
+        A non-success status raises the matching `RuneAPIError`; a body that does not
+        match the schema raises a `RuneAPIResponseValidationError`.
         """
         return cast(Self, parse_response(response, cast(Any, cls)))
 
@@ -79,10 +79,10 @@ class _ResponseMixin:
 
     @cached_property
     def request_id(self) -> str:
-        """The ``x-typesafe-request-id`` response header."""
+        """The ``x-request-id`` response header."""
         request_id: str | None = self.__dict__.get("_request_id")
         if request_id is None:
-            raise TypeSafeError("The response did not include a request ID.")
+            raise RuneError("The response did not include a request ID.")
         return request_id
 
     @property
@@ -90,7 +90,7 @@ class _ResponseMixin:
         """The underlying `httpx2.Response`, exposing status, headers, and body."""
         response: httpx2.Response | None = self.__dict__.get("_raw")
         if response is None:
-            raise TypeSafeError("The response was not created from a raw HTTP response.")
+            raise RuneError("The response was not created from a raw HTTP response.")
         return response
 
 
@@ -103,7 +103,7 @@ def parse_response(response: httpx2.Response, response_type: type[ResponseT]) ->
     if not response.is_success:
         raise api_error(response.status_code, deserialize(response.content), response.headers, _request_endpoint(response))
     if issubclass(response_type, _ResponseMixin):
-        result = response_type._decode(response)  # noqa: SLF001 - Dispatch to the SDK response decoder.
+        result = response_type._decode(response)
     else:
         try:
             result = response_type.model_validate_json(response.content)

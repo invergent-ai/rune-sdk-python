@@ -7,14 +7,14 @@ from pydantic import BaseModel, ConfigDict, model_serializer
 from pydantic.functional_serializers import SerializerFunctionWrapHandler
 from typing_extensions import NotRequired, TypedDict
 
-from typesafe_sdk._core.json_types import JSONContent
-from typesafe_sdk._schemas import models as wire
+from rune_sdk._core.json_types import JSONContent
+from rune_sdk._schemas import models as wire
 
 
 class NoulCriteria(TypedDict, total=False, closed=True):
     """Optional descriptions of the yes and no outcomes.
 
-    See the [noul primitive](https://docs.typesafe.ai/primitives/noul) for details.
+    See the [noul primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     true: JSONContent | None
@@ -26,7 +26,7 @@ class NoulCriteria(TypedDict, total=False, closed=True):
 class NoulModel(TypedDict, closed=True):
     """A yes/no question dictionary with `type="noul"`.
 
-    See the [noul primitive](https://docs.typesafe.ai/primitives/noul) for details.
+    See the [noul primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     type: Literal["noul"]
@@ -39,7 +39,7 @@ class NoulModel(TypedDict, closed=True):
 class ChoiceModel(TypedDict, closed=True):
     """A choice question dictionary with `type="choice"`.
 
-    See the [choice primitive](https://docs.typesafe.ai/primitives/choice) for details.
+    See the [choice primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     type: Literal["choice"]
@@ -52,7 +52,7 @@ class ChoiceModel(TypedDict, closed=True):
 class ScoreModel(TypedDict, closed=True):
     """A score question dictionary with `type="score"`.
 
-    See the [score primitive](https://docs.typesafe.ai/primitives/score) for details.
+    See the [score primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     type: Literal["score"]
@@ -77,7 +77,7 @@ class _Question(BaseModel):
 class Noul(_Question, wire.NoulQuestion):
     """A yes/no question with optional descriptions for either outcome.
 
-    See the [noul primitive](https://docs.typesafe.ai/primitives/noul) for details.
+    See the [noul primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     type: Literal["noul"] = "noul"
@@ -90,7 +90,7 @@ class Noul(_Question, wire.NoulQuestion):
 class Choice(_Question, wire.ChoiceQuestion):
     """A question that selects between named alternatives.
 
-    See the [choice primitive](https://docs.typesafe.ai/primitives/choice) for details.
+    See the [choice primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     type: Literal["choice"] = "choice"
@@ -103,7 +103,7 @@ class Choice(_Question, wire.ChoiceQuestion):
 class Score(_Question, wire.ScoreQuestion):
     """A question that assigns a score using an ordered rubric.
 
-    See the [score primitive](https://docs.typesafe.ai/primitives/score) for details.
+    See the [score primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     type: Literal["score"] = "score"
@@ -119,3 +119,13 @@ Question: TypeAlias = Noul | Choice | Score | QuestionModel
 """A question object or question dictionary."""
 Questions: TypeAlias = Mapping[str, Question]
 """Question inputs keyed by the names used to identify their answers."""
+
+
+class ImageURL(TypedDict, closed=True):
+    """An image encoded as a data URL."""
+
+    url: str
+
+
+ImageInput: TypeAlias = str | ImageURL
+"""A data URL string or an object with a data URL in its `url` field."""

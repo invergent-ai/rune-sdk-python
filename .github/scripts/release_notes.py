@@ -1,6 +1,6 @@
 """Extract a tagged release's title and notes from the changelog."""
 
-# ruff: noqa: INP001 - Standalone CI script.
+
 
 import os
 import re

@@ -1,5 +1,5 @@
 # serializer version: 1
-# name: test_constructor_kwargs[AsyncTypeSafeClient]
+# name: test_constructor_kwargs[AsyncRuneClient]
   list([
     'api_key',
     'model',
@@ -11,7 +11,7 @@
     'base_url',
   ])
 # ---
-# name: test_constructor_kwargs[TypeSafeClient]
+# name: test_constructor_kwargs[RuneClient]
   list([
     'api_key',
     'model',
@@ -23,7 +23,7 @@
     'base_url',
   ])
 # ---
-# name: test_public_members[typesafe_sdk.constants]
+# name: test_public_members[rune_sdk.constants]
   list([
     'API_KEY_ENV',
     'BASE_URL_ENV',
@@ -34,14 +34,17 @@
     'LOG_LEVEL_ENV',
   ])
 # ---
-# name: test_public_members[typesafe_sdk]
+# name: test_public_members[rune_sdk]
   list([
     'Answer',
     'AsyncModels',
-    'AsyncTypeSafeClient',
+    'AsyncRuneClient',
     'Choice',
     'ChoiceAnswer',
     'ChoiceModel',
+    'DecisionsResponse',
+    'ImageInput',
+    'ImageURL',
     'JSONContent',
     'JSONValue',
     'ListModelsResponse',
@@ -55,23 +58,23 @@
     'QuestionModel',
     'Questions',
     'RetryPolicy',
+    'RuneAPIConnectionError',
+    'RuneAPIError',
+    'RuneAPIResponseValidationError',
+    'RuneAPITimeoutError',
+    'RuneAuthenticationError',
+    'RuneBadRequestError',
+    'RuneClient',
+    'RuneError',
+    'RuneInternalServerError',
+    'RuneNotFoundError',
+    'RunePermissionDeniedError',
+    'RuneRateLimitError',
+    'RuneUnprocessableEntityError',
     'Score',
     'ScoreAnswer',
     'ScoreModel',
-    'SystemOneResponse',
-    'TypeSafeAPIConnectionError',
-    'TypeSafeAPIError',
-    'TypeSafeAPIResponseValidationError',
-    'TypeSafeAPITimeoutError',
-    'TypeSafeAuthenticationError',
-    'TypeSafeBadRequestError',
-    'TypeSafeClient',
-    'TypeSafeError',
-    'TypeSafeInternalServerError',
-    'TypeSafeNotFoundError',
-    'TypeSafePermissionDeniedError',
-    'TypeSafeRateLimitError',
-    'TypeSafeUnprocessableEntityError',
+    'ThinkingMetadata',
     'Usage',
     'constants',
   ])

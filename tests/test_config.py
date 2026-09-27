@@ -4,10 +4,10 @@ import httpx2
 import pytest
 from pydantic_core import from_json
 
+from rune_sdk import AsyncRuneClient, RuneClient, RuneError
 from tests.conftest import ClientFactory
-from tests.helpers import models, system_one
+from tests.helpers import decide, models
 from tests.test_clients import RESULT
-from typesafe_sdk import AsyncTypeSafeClient, TypeSafeClient, TypeSafeError
 
 
 async def test_transport_and_http_client_mutually_exclusive(clients: ClientFactory) -> None:
@@ -33,7 +33,7 @@ async def test_model_override(clients: ClientFactory, model: str | None) -> None
         assert from_json(request.content)["model"] == (model or "client-model")
         return httpx2.Response(200, json=RESULT)
 
-    await system_one(
+    await decide(
         clients(handler, model="client-model"),
         state="hello",
         questions={"q": {"type": "noul", "instructions": "?"}},
@@ -44,18 +44,18 @@ async def test_model_override(clients: ClientFactory, model: str | None) -> None
 @pytest.mark.parametrize("source", ["default", "env", "constructor"])
 async def test_resolution(clients: ClientFactory, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
     if source != "default":
-        monkeypatch.setenv("TYPESAFE_API_KEY", "  env-key  ")
-        monkeypatch.setenv("TYPESAFE_BASE_URL", "  https://env.test///  ")
-        monkeypatch.setenv("TYPESAFE_DEFAULT_MODEL", "  env-model  ")
+        monkeypatch.setenv("RUNE_API_KEY", "  env-key  ")
+        monkeypatch.setenv("RUNE_BASE_URL", "  https://env.test///  ")
+        monkeypatch.setenv("RUNE_DEFAULT_MODEL", "  env-model  ")
     expected_key = "code-key" if source == "constructor" else "env-key" if source == "env" else "test-key"
-    expected_url = "https://code.test" if source == "constructor" else "https://env.test" if source == "env" else "https://api.typesafe.ai"
-    expected_model = "code-model" if source == "constructor" else "env-model" if source == "env" else "jev-latest"
+    expected_url = "https://code.test" if source == "constructor" else "https://env.test" if source == "env" else "https://rune.surogate.ai"
+    expected_model = "code-model" if source == "constructor" else "env-model" if source == "env" else "rune-v3"
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.headers["authorization"] == f"Bearer {expected_key}"
-        assert str(request.url) == expected_url + "/v1/systemone"
+        assert str(request.url) == expected_url + "/v1/decisions"
         assert from_json(request.content)["model"] == expected_model
-        assert request.extensions["timeout"] == {"connect": 10.0, "read": 10.0, "write": 10.0, "pool": 10.0}
+        assert request.extensions["timeout"] == {"connect": 120.0, "read": 120.0, "write": 120.0, "pool": 120.0}
         return httpx2.Response(200, json=RESULT)
 
     if source == "constructor":
@@ -64,15 +64,15 @@ async def test_resolution(clients: ClientFactory, monkeypatch: pytest.MonkeyPatc
         client = clients(handler, api_key=None)
     else:
         client = clients(handler)
-    await system_one(client, state="hello", questions={"q": {"type": "noul", "instructions": "?"}})
+    await decide(client, state="hello", questions={"q": {"type": "noul", "instructions": "?"}})
 
 
-@pytest.mark.parametrize("client_type", [TypeSafeClient, AsyncTypeSafeClient])
+@pytest.mark.parametrize("client_type", [RuneClient, AsyncRuneClient])
 @pytest.mark.parametrize("key", [None, "", " \t\n "])
-def test_missing_key(client_type: type[TypeSafeClient] | type[AsyncTypeSafeClient], monkeypatch: pytest.MonkeyPatch, key: str | None) -> None:
+def test_missing_key(client_type: type[RuneClient] | type[AsyncRuneClient], monkeypatch: pytest.MonkeyPatch, key: str | None) -> None:
     if key is not None:
-        monkeypatch.setenv("TYPESAFE_API_KEY", key)
-    with pytest.raises(TypeSafeError, match="TYPESAFE_API_KEY"):
+        monkeypatch.setenv("RUNE_API_KEY", key)
+    with pytest.raises(RuneError, match="RUNE_API_KEY"):
         client_type()
 
 
@@ -80,19 +80,19 @@ def test_missing_key(client_type: type[TypeSafeClient] | type[AsyncTypeSafeClien
 @pytest.mark.parametrize("padding", ["", "\n", "\r\n", " \t\r\n "])
 async def test_api_key_whitespace(clients: ClientFactory, monkeypatch: pytest.MonkeyPatch, source: str, padding: str) -> None:
     key = f"{padding}test-key{padding}"
-    monkeypatch.setenv("TYPESAFE_API_KEY", key if source == "env" else "env-key")
+    monkeypatch.setenv("RUNE_API_KEY", key if source == "env" else "env-key")
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.headers["authorization"] == "Bearer test-key"
-        return httpx2.Response(200, json={"models": []})
+        return httpx2.Response(200, json={"data": []})
 
     assert await models(clients(handler, api_key=None if source == "env" else key)) == ()
 
 
 @pytest.mark.parametrize("key", ["", " \t\r\n ", "\x00private", "private\x00"])
 async def test_invalid_explicit_key_does_not_fall_back_to_env(clients: ClientFactory, monkeypatch: pytest.MonkeyPatch, key: str) -> None:
-    monkeypatch.setenv("TYPESAFE_API_KEY", "env-key")
-    with pytest.raises(TypeSafeError, match="API key"):
+    monkeypatch.setenv("RUNE_API_KEY", "env-key")
+    with pytest.raises(RuneError, match="API key"):
         clients(lambda request: pytest.fail("Unexpected request"), api_key=key)
 
 
@@ -101,8 +101,8 @@ async def test_invalid_explicit_key_does_not_fall_back_to_env(clients: ClientFac
 async def test_invalid_api_key(clients: ClientFactory, monkeypatch: pytest.MonkeyPatch, source: str, character: str) -> None:
     credential = "ts_live_private"
     key = f"{credential}{character}suffix"
-    monkeypatch.setenv("TYPESAFE_API_KEY", key if source == "env" else "env-key")
-    with pytest.raises(TypeSafeError, match="API key") as caught:
+    monkeypatch.setenv("RUNE_API_KEY", key if source == "env" else "env-key")
+    with pytest.raises(RuneError, match="API key") as caught:
         clients(lambda request: pytest.fail("Unexpected request"), api_key=None if source == "env" else key)
     error = caught.value
     assert credential not in str(error)
@@ -111,23 +111,23 @@ async def test_invalid_api_key(clients: ClientFactory, monkeypatch: pytest.Monke
 
 
 async def test_empty_env_unset(clients: ClientFactory, monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("TYPESAFE_BASE_URL", "TYPESAFE_DEFAULT_MODEL", "TYPESAFE_LOG_LEVEL"):
+    for name in ("RUNE_BASE_URL", "RUNE_DEFAULT_MODEL", "RUNE_LOG_LEVEL"):
         monkeypatch.setenv(name, " \t ")
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        assert str(request.url) == "https://api.typesafe.ai/v1/systemone"
-        assert from_json(request.content)["model"] == "jev-latest"
+        assert str(request.url) == "https://rune.surogate.ai/v1/decisions"
+        assert from_json(request.content)["model"] == "rune-v3"
         return httpx2.Response(200, json=RESULT)
 
-    await system_one(clients(handler), state="x", questions={"q": {"type": "noul", "instructions": "?"}})
+    await decide(clients(handler), state="x", questions={"q": {"type": "noul", "instructions": "?"}})
 
 
 @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])
 async def test_invalid_timeout(clients: ClientFactory, value: float) -> None:
-    with pytest.raises(TypeSafeError, match="timeout"):
+    with pytest.raises(RuneError, match="timeout"):
         clients(lambda request: httpx2.Response(200), timeout=value)
     client = clients(lambda request: pytest.fail("Unexpected request"))
-    with pytest.raises(TypeSafeError, match="timeout"):
+    with pytest.raises(RuneError, match="timeout"):
         await models(client, timeout=value)
 
 
@@ -136,7 +136,7 @@ async def test_timeout_object(clients: ClientFactory) -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         assert request.extensions["timeout"] == {"connect": 1.0, "read": 7.0, "write": 7.0, "pool": 7.0}
-        return httpx2.Response(200, json={"models": []})
+        return httpx2.Response(200, json={"data": []})
 
     assert await models(clients(handler, timeout=timeout)) == ()
 
@@ -153,7 +153,7 @@ async def test_http_client_timeout_precedence(
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"models": []})
+        return httpx2.Response(200, json={"data": []})
 
     http_client = (
         httpx2.AsyncClient(transport=httpx2.MockTransport(handler), timeout=http_timeout)

@@ -1,8 +1,8 @@
 """Standard-library logging with credential redaction.
 
-The SDK emits to the ``typesafe_sdk`` logger and never configures handlers or levels beyond an
-optional convenience: set ``TYPESAFE_LOG_LEVEL`` (``debug``/``info``/...) and the level is applied
-once at import. Otherwise configure the ``typesafe_sdk`` logger through standard logging as usual.
+The SDK emits to the ``rune_sdk`` logger and never configures handlers or levels beyond an
+optional convenience: set ``RUNE_LOG_LEVEL`` (``debug``/``info``/...) and the level is applied
+once at import. Otherwise configure the ``rune_sdk`` logger through standard logging as usual.
 """
 
 import json
@@ -13,8 +13,8 @@ from collections.abc import Mapping
 
 from typing_extensions import override
 
-from typesafe_sdk._core.constants import LOGGER_NAME, SECRET_HEADERS
-from typesafe_sdk.constants import LOG_LEVEL_ENV
+from rune_sdk._core.constants import LOGGER_NAME, SECRET_HEADERS
+from rune_sdk.constants import LOG_LEVEL_ENV
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -95,7 +95,7 @@ class SensitiveHeadersFilter(logging.Filter):
 
 
 def setup_logging() -> None:
-    """Apply ``TYPESAFE_LOG_LEVEL`` to the ``typesafe_sdk`` logger if it names a known level."""
+    """Apply ``RUNE_LOG_LEVEL`` to the ``rune_sdk`` logger if it names a known level."""
     level = (os.environ.get(LOG_LEVEL_ENV) or "").strip().lower()
     if level in LOG_LEVELS:
         logger.setLevel(LOG_LEVELS[level])

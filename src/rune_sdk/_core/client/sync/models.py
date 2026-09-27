@@ -1,19 +1,19 @@
-"""Model resource for the synchronous client, exposed as `TypeSafeClient.models`."""
+"""Model resource for the synchronous client, exposed as `RuneClient.models`."""
 
 from collections.abc import Mapping
 
 import httpx2
 from tenacity import Retrying
 
-from typesafe_sdk._core.config import Config
-from typesafe_sdk._core.endpoints import prepare_models
-from typesafe_sdk._core.response_types import ListModelsResponse
-from typesafe_sdk._core.retry import RetryPolicy
-from typesafe_sdk._core.transport import send
+from rune_sdk._core.config import Config
+from rune_sdk._core.endpoints import prepare_models
+from rune_sdk._core.response_types import ListModelsResponse
+from rune_sdk._core.retry import RetryPolicy
+from rune_sdk._core.transport import send
 
 
 class Models:
-    """Access to the models available to the account, reached through `TypeSafeClient.models`."""
+    """Access to the models available to the account, reached through `RuneClient.models`."""
 
     def __init__(self, config: Config, http_client: httpx2.Client, retry: Retrying) -> None:
         self._config = config
@@ -40,14 +40,14 @@ class Models:
             and release date.
 
         Raises:
-            TypeSafeAPIError: The server returns an unsuccessful HTTP response after any retries.
-            TypeSafeAPIConnectionError: The request cannot connect or times out after any retries.
+            RuneAPIError: The server returns an unsuccessful HTTP response after any retries.
+            RuneAPIConnectionError: The request cannot connect or times out after any retries.
 
         Examples:
             ```python
-            from typesafe_sdk import TypeSafeClient
+            from rune_sdk import RuneClient
 
-            with TypeSafeClient() as client:
+            with RuneClient() as client:
                 models = client.models.list()
             ```
         """

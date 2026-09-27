@@ -1,6 +1,6 @@
 """Smoke-test wheel and sdist installations."""
 
-# ruff: noqa: INP001, S603, S607 - Standalone helper using explicit uv arguments.
+
 
 import shutil
 import subprocess
@@ -14,7 +14,7 @@ def check_distributions(distributions: Path, version: str) -> None:
     wheels, sdists = list(distributions.glob("*.whl")), list(distributions.glob("*.tar.gz"))
     if len(wheels) != 1 or len(sdists) != 1:
         raise ValueError("Expected exactly one wheel and one source distribution")
-    with tempfile.TemporaryDirectory(prefix="typesafe-distributions-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rune-distributions-") as temporary:
         consumer = Path(temporary)
         installation_check = consumer / "check_installed_distribution.py"
         shutil.copyfile(Path(__file__).with_name("check_installed_distribution.py"), installation_check)

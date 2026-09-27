@@ -1,4 +1,4 @@
-from typesafe_sdk import ChoiceModel, NoulModel, Question, ScoreModel
+from rune_sdk import ChoiceModel, NoulModel, Question, ScoreModel
 
 choice: ChoiceModel = {"type": "noul", "instructions": "?", "criteria": {"a": None}}  # E: is not assignable to TypedDict key `type`
 noul: NoulModel = {"type": "choice", "instructions": "?"}  # E: is not assignable to TypedDict key `type`

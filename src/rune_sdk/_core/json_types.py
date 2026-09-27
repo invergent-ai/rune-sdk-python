@@ -18,4 +18,4 @@ JSONContent = TypeAliasType(
     "JSONContent",
     "str | Mapping[str, JSONValue | None] | Sequence[JSONValue | None]",
 )
-"""Either a plain string or a mapping/sequence of [`JSONValue`][typesafe_sdk.JSONValue] entries."""
+"""Either a plain string or a mapping/sequence of [`JSONValue`][rune_sdk.JSONValue] entries."""

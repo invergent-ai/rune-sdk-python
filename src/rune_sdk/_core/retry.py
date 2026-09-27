@@ -5,11 +5,24 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from tenacity import AsyncRetrying, RetryCallState, Retrying, retry_if_exception, stop_after_attempt, stop_before_delay
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    Retrying,
+    retry_if_exception,
+    stop_after_attempt,
+    stop_before_delay,
+)
 from tenacity.stop import stop_base
 
-from typesafe_sdk._core.config import resolve_timeout
-from typesafe_sdk._core.errors import TypeSafeAPIConnectionError, TypeSafeAPIError, TypeSafeAPITimeoutError, TypeSafeError, parse_retry_after
+from rune_sdk._core.config import resolve_timeout
+from rune_sdk._core.errors import (
+    RuneAPIConnectionError,
+    RuneAPIError,
+    RuneAPITimeoutError,
+    RuneError,
+    parse_retry_after,
+)
 
 # `build_tenacity`/`build_tenacity_async` are internal build seams and stay out of the public docs.
 __all__ = ["RetryPolicy"]
@@ -17,7 +30,7 @@ __all__ = ["RetryPolicy"]
 
 def _retry_after(state: RetryCallState) -> float | None:
     error = state.outcome.exception() if state.outcome is not None else None
-    if isinstance(error, TypeSafeAPIError):
+    if isinstance(error, RuneAPIError):
         delay = parse_retry_after(error.headers)
         if delay is not None:
             return delay / 1000
@@ -29,7 +42,7 @@ def _backoff(attempt: int, initial: float, maximum: float, jitter: float) -> flo
         return 0.0
     exponent = attempt - 1
     exponential = maximum if exponent >= math.log2(maximum) - math.log2(initial) else math.ldexp(initial, exponent)
-    delay = exponential * (1 - random.random() * jitter)  # noqa: S311 - Backoff jitter, not cryptography.
+    delay = exponential * (1 - random.random() * jitter)
     return min(exponential, round(delay, 3))
 
 
@@ -39,9 +52,9 @@ class RetryPolicy:
 
     Examples:
         ```python
-        from typesafe_sdk import RetryPolicy, TypeSafeClient
+        from rune_sdk import RetryPolicy, RuneClient
 
-        client = TypeSafeClient(
+        client = RuneClient(
             retry=RetryPolicy(
                 max_retries=3, timeout=10.0, http_statuses={429, 500, 502, 503, 504}
             )
@@ -68,10 +81,10 @@ class RetryPolicy:
     """Whether to honor `Retry-After` and `retry-after-ms` response headers."""
 
     api_connection_error: bool = True
-    """Whether to retry `TypeSafeAPIConnectionError`, raised when the request cannot reach or read from the server."""
+    """Whether to retry `RuneAPIConnectionError`, raised when the request cannot reach or read from the server."""
 
     api_timeout_error: bool = True
-    """Whether to retry `TypeSafeAPITimeoutError`, raised when the request exceeds its timeout."""
+    """Whether to retry `RuneAPITimeoutError`, raised when the request exceeds its timeout."""
 
     exceptions: set[type[BaseException]] = field(default_factory=set)
     """Additional exception types that trigger a retry, on top of the built-in rules."""
@@ -88,21 +101,21 @@ class RetryPolicy:
     def __post_init__(self) -> None:
         """Validate retry counts, delays, jitter, and the optional retry timeout."""
         if not isinstance(self.max_retries, int) or self.max_retries < 0:
-            raise TypeSafeError("max_retries must be a non-negative integer.")
+            raise RuneError("max_retries must be a non-negative integer.")
         for name, value in (("backoff_initial", self.backoff_initial), ("backoff_max", self.backoff_max)):
             if not math.isfinite(value) or value < 0:
-                raise TypeSafeError(f"{name} must be a non-negative, finite number of seconds.")
+                raise RuneError(f"{name} must be a non-negative, finite number of seconds.")
         if not 0 <= self.backoff_jitter <= 1:
-            raise TypeSafeError("backoff_jitter must be between zero and one.")
+            raise RuneError("backoff_jitter must be between zero and one.")
         if self.timeout is not None:
             resolve_timeout(self.timeout)
 
     def _retryable(self, error: BaseException) -> bool:
-        if isinstance(error, TypeSafeAPITimeoutError):
+        if isinstance(error, RuneAPITimeoutError):
             builtin = self.api_timeout_error
-        elif isinstance(error, TypeSafeAPIConnectionError):
+        elif isinstance(error, RuneAPIConnectionError):
             builtin = self.api_connection_error
-        elif isinstance(error, TypeSafeAPIError):
+        elif isinstance(error, RuneAPIError):
             builtin = error.status in self.http_statuses
         else:
             builtin = False
@@ -128,9 +141,9 @@ class RetryPolicy:
 
 def build_tenacity(policy: "RetryPolicy | None") -> Retrying:
     """Build the synchronous Tenacity policy, falling back to default retry behavior when `policy` is None."""
-    return (policy or RetryPolicy())._build_tenacity()  # noqa: SLF001 - internal build seam.
+    return (policy or RetryPolicy())._build_tenacity()
 
 
 def build_tenacity_async(policy: "RetryPolicy | None") -> AsyncRetrying:
     """Build the asynchronous Tenacity policy, falling back to default retry behavior when `policy` is None."""
-    return (policy or RetryPolicy())._build_tenacity_async()  # noqa: SLF001 - internal build seam.
+    return (policy or RetryPolicy())._build_tenacity_async()
