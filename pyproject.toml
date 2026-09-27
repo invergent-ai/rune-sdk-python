@@ -1,7 +1,7 @@
 [project]
 name = "rune-sdk"
 version = "0.1.0"
-description = "Python SDK for the Invergent Rune API."
+description = "Python SDK for the Surogate Rune API."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -12,7 +12,7 @@ maintainers = [
     { name = "Invergent" }
 ]
 requires-python = ">=3.10"
-keywords = ["invergent", "rune", "sdk", "api", "ai"]
+keywords = ["surogate", "rune", "invergent", "sdk", "api", "ai"]
 classifiers = [
     "Typing :: Typed",
     "Development Status :: 4 - Beta",

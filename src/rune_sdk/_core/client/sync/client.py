@@ -31,7 +31,7 @@ class RuneClient:
         http_client: httpx2.Client | None = None,
         base_url: str | None = None,
     ) -> None:
-        """Create an HTTP client for the [Invergent Rune API](https://github.com/invergent-ai/rune-sdk-python).
+        """Create an HTTP client for the [Surogate Rune API](https://github.com/invergent-ai/rune-sdk-python).
 
         Explicit options take precedence over environment variables; empty or whitespace-only
         environment values are ignored.

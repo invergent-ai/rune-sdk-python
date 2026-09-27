@@ -1,6 +1,6 @@
-# Invergent Rune Python SDK
+# Surogate Rune Python SDK
 
-Python clients for the Rune decisions API, maintained by Invergent. Requires Python 3.10+.
+Python clients for the Surogate Rune decisions API, maintained by Invergent. Requires Python 3.10+.
 
 ## Install
 
