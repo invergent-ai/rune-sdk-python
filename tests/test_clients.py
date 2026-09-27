@@ -279,7 +279,7 @@ async def test_invalid_models_response(clients: ClientFactory, body: object) -> 
     "questions,match",
     [
         ({}, "At least one question"),
-        ({"rating": Score(instructions="?", criteria=[])}, '"rating" has fewer than two criteria'),
+        ({"rating": Score(instructions="?", criteria=[])}, '"rating" has no criteria'),
     ],
 )
 async def test_validation_before_network(clients: ClientFactory, questions: Any, match: str) -> None:

@@ -170,7 +170,7 @@ class RuneClient:
             name and model and token usage details when no custom model is supplied.
 
         Raises:
-            RuneError: Questions are empty or a score question has fewer than two criteria.
+            RuneError: Questions are empty or a score question has no criteria.
             RuneAPIError: The server returns an unsuccessful HTTP response after any retries.
             RuneAPIConnectionError: The request cannot connect or times out after any retries.
             RuneAPIResponseValidationError: The response body does not match the response model.
