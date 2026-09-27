@@ -152,6 +152,13 @@ def test_optional_noul_criteria(raw: bool, criteria: NoulCriteria | None) -> Non
     assert from_json(to_json(normalize_questions({"q": question}))) == {"q": expected}
 
 
+@pytest.mark.parametrize("raw", [False, True])
+def test_single_score_criterion_is_preserved(raw: bool) -> None:
+    model = cast(ScoreModel, {"type": "score", "instructions": "Quality?", "criteria": ["only"]})
+    question = model if raw else Score(instructions=model["instructions"], criteria=model["criteria"])
+    assert normalize_questions({"rating": question})["rating"]["criteria"] == ["only"]
+
+
 def test_typed_noul_criteria_reject_unknown_fields() -> None:
     criteria = cast(NoulCriteria, {"true": "yes", "metadata": {"source": None}})
     with pytest.raises(ValidationError, match="extra_forbidden"):
@@ -162,7 +169,7 @@ def test_typed_noul_criteria_reject_unknown_fields() -> None:
 def test_empty_score_criteria_is_rejected(raw: bool) -> None:
     model = cast(ScoreModel, {"type": "score", "instructions": "Quality?", "criteria": []})
     question = model if raw else Score(instructions=model["instructions"], criteria=model["criteria"])
-    with pytest.raises(RuneError, match='"rating" has fewer than two criteria'):
+    with pytest.raises(RuneError, match='"rating" has no criteria'):
         normalize_questions({"rating": question})
 
 

@@ -42,5 +42,5 @@ def normalize_questions(questions: Mapping[str, Question]) -> dict[str, dict[str
 
 
 def _validate_score_criteria(name: str, criteria: Sequence[JSONContent]) -> None:
-    if len(criteria) < 2:
-        raise RuneError(f'Score question "{name}" has fewer than two criteria; at least two scores are required.')
+    if len(criteria) < 1:
+        raise RuneError(f'Score question "{name}" has no criteria; at least one score is required.')
