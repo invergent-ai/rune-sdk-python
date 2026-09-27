@@ -20,8 +20,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def git(repo: Path, *args: str) -> str:
-    return subprocess.check_output(  # noqa: S603 - Explicit Git arguments in disposable fixtures.
-        ["git", *args],  # noqa: S607 - Git is supplied by CI.
+    return subprocess.check_output(
+        ["git", *args],
         cwd=repo,
         text=True,
         stderr=subprocess.PIPE,
@@ -40,12 +40,12 @@ def commit(repo: Path, message: str = "private work") -> None:
 
 
 def set_version(repo: Path, version: str) -> None:
-    write(repo, "pyproject.toml", f'[project]\nname = "typesafe-sdk"\nversion = "{version}"\n')
+    write(repo, "pyproject.toml", f'[project]\nname = "rune-sdk"\nversion = "{version}"\n')
     write(repo, "docs/changelog.md", f"## v{version} (2026-09-11)\n\nReviewed release notes.\n")
 
 
 def run_script(source: Path, script: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603 - Repository-owned script with explicit fixture paths.
+    return subprocess.run(
         [sys.executable, str(SCRIPTS / script), *args],
         cwd=source,
         text=True,
@@ -69,7 +69,7 @@ def repos(tmp_path: Path) -> tuple[Path, Path, Path]:
     git(destination, "remote", "add", "origin", str(remote))
     set_version(source, "42.0.0")
     write(source, ".releaseinclude", INCLUDES)
-    write(source, "src/typesafe_sdk/__init__.py", "# public source\n")
+    write(source, "src/rune_sdk/__init__.py", "# public source\n")
     write(source, ".github/workflows/publish.yml", "name: Publish\n")
     write(source, ".github/workflows/CI.yml", "private CI\n")
     write(source, ".dagger/private.py", "private infrastructure\n")
@@ -93,7 +93,7 @@ def signer(repos: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch) -> M
     def blob(content: bytes) -> str:
         return (
             subprocess.check_output(
-                ["git", "hash-object", "-w", "--stdin"],  # noqa: S607 - Git is supplied by CI.
+                ["git", "hash-object", "-w", "--stdin"],
                 input=content,
                 cwd=remote,
             )
@@ -219,13 +219,13 @@ def test_snapshot_and_push_retries(repos: tuple[Path, Path, Path]) -> None:
     source, destination, remote = repos
     # Export the committed version despite local edits.
     write(source, "src/untracked.py", "private draft")
-    write(source, "src/typesafe_sdk/__init__.py", "uncommitted edits")
+    write(source, "src/rune_sdk/__init__.py", "uncommitted edits")
     set_version(source, "99.0.0")
     result = sync(source, destination)
     assert result.returncode == 0, result.stderr
     assert git(destination, "rev-list", "--count", "HEAD") == "1"
     assert git(destination, "log", "-1", "--format=%s") == "Release v42.0.0"
-    assert (destination / "src/typesafe_sdk/__init__.py").read_text() == "# public source\n"
+    assert (destination / "src/rune_sdk/__init__.py").read_text() == "# public source\n"
     assert not any(
         (destination / path).exists() for path in [".dagger", "RELEASING.md", ".releaseinclude", "src/untracked.py", ".github/workflows/CI.yml"]
     )

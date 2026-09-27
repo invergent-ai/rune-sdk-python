@@ -13,8 +13,8 @@ import httpx2
 from pydantic_core import PydanticSerializationError
 from tenacity import AsyncRetrying, Retrying
 
-from typesafe_sdk._core.config import Config, resolve_timeout
-from typesafe_sdk._core.constants import (
+from rune_sdk._core.config import Config, resolve_timeout
+from rune_sdk._core.constants import (
     ACCEPT_HEADER,
     AUTHORIZATION_HEADER,
     CONTENT_TYPE_HEADER,
@@ -26,12 +26,12 @@ from typesafe_sdk._core.constants import (
     SDK_NAME,
     USER_AGENT_HEADER,
 )
-from typesafe_sdk._core.errors import TypeSafeAPIConnectionError, TypeSafeAPITimeoutError, TypeSafeError
-from typesafe_sdk._core.json import serialize
-from typesafe_sdk._core.logging import logger, redact_exception
-from typesafe_sdk._core.retry import RetryPolicy, build_tenacity, build_tenacity_async
-from typesafe_sdk._core.schemas.base import ResponseT, parse_response
-from typesafe_sdk._version import __version__
+from rune_sdk._core.errors import RuneAPIConnectionError, RuneAPITimeoutError, RuneError
+from rune_sdk._core.json import serialize
+from rune_sdk._core.logging import logger, redact_exception
+from rune_sdk._core.retry import RetryPolicy, build_tenacity, build_tenacity_async
+from rune_sdk._core.schemas.base import ResponseT, parse_response
+from rune_sdk._version import __version__
 
 RUNTIME = f"python/{platform.python_version()} ({sys.platform}; {platform.machine()})"
 
@@ -79,11 +79,11 @@ class RequestState(Generic[ResponseT]):
         except httpx2.RequestError as error:
             logger.info("%s %s <- %s", request.method, request.url, type(error).__name__)
             safe_error = redact_exception(error, headers)
-            sdk_error: TypeSafeAPIConnectionError
+            sdk_error: RuneAPIConnectionError
             if isinstance(error, httpx2.TimeoutException):
-                sdk_error = TypeSafeAPITimeoutError(request.timeout)
+                sdk_error = RuneAPITimeoutError(request.timeout)
             else:
-                sdk_error = TypeSafeAPIConnectionError(f"Connection error: {safe_error}")
+                sdk_error = RuneAPIConnectionError(f"Connection error: {safe_error}")
             try:
                 raise sdk_error from safe_error
             finally:
@@ -143,7 +143,7 @@ def _encode_body(body: object) -> bytes:
     try:
         return serialize(body)
     except (PydanticSerializationError, TypeError, ValueError) as error:
-        raise TypeSafeError("The request body could not be encoded as JSON") from error
+        raise RuneError("The request body could not be encoded as JSON") from error
 
 
 def send(http_client: httpx2.Client, retry: Retrying, request: Request[ResponseT], override: RetryPolicy | None = None) -> ResponseT:

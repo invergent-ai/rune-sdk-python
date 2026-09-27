@@ -1,19 +1,19 @@
-"""Model resource for the asynchronous client, exposed as `AsyncTypeSafeClient.models`."""
+"""Model resource for the asynchronous client, exposed as `AsyncRuneClient.models`."""
 
 from collections.abc import Mapping
 
 import httpx2
 from tenacity import AsyncRetrying
 
-from typesafe_sdk._core.config import Config
-from typesafe_sdk._core.endpoints import prepare_models
-from typesafe_sdk._core.response_types import ListModelsResponse
-from typesafe_sdk._core.retry import RetryPolicy
-from typesafe_sdk._core.transport import send_async
+from rune_sdk._core.config import Config
+from rune_sdk._core.endpoints import prepare_models
+from rune_sdk._core.response_types import ListModelsResponse
+from rune_sdk._core.retry import RetryPolicy
+from rune_sdk._core.transport import send_async
 
 
 class AsyncModels:
-    """Access to the models available to the account, reached through `AsyncTypeSafeClient.models`."""
+    """Access to the models available to the account, reached through `AsyncRuneClient.models`."""
 
     def __init__(self, config: Config, http_client: httpx2.AsyncClient, retry: AsyncRetrying) -> None:
         self._config = config
@@ -40,16 +40,16 @@ class AsyncModels:
             and release date.
 
         Raises:
-            TypeSafeAPIError: The server returns an unsuccessful HTTP response after any retries.
-            TypeSafeAPIConnectionError: The request cannot connect or times out after any retries.
+            RuneAPIError: The server returns an unsuccessful HTTP response after any retries.
+            RuneAPIConnectionError: The request cannot connect or times out after any retries.
 
         Examples:
             ```python
-            from typesafe_sdk import AsyncTypeSafeClient
+            from rune_sdk import AsyncRuneClient
 
 
             async def main() -> None:
-                async with AsyncTypeSafeClient() as client:
+                async with AsyncRuneClient() as client:
                     models = await client.models.list()
             ```
         """

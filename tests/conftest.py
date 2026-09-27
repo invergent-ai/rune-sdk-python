@@ -4,10 +4,15 @@ from collections.abc import AsyncIterator, Callable, Mapping
 import httpx2
 import pytest
 
-from typesafe_sdk import AsyncTypeSafeClient, RetryPolicy, TypeSafeClient
-from typesafe_sdk.constants import API_KEY_ENV, BASE_URL_ENV, DEFAULT_MODEL_ENV, LOG_LEVEL_ENV
+from rune_sdk import AsyncRuneClient, RetryPolicy, RuneClient
+from rune_sdk.constants import (
+    API_KEY_ENV,
+    BASE_URL_ENV,
+    DEFAULT_MODEL_ENV,
+    LOG_LEVEL_ENV,
+)
 
-Client = TypeSafeClient | AsyncTypeSafeClient
+Client = RuneClient | AsyncRuneClient
 
 
 class ClientFactory:
@@ -37,7 +42,7 @@ class ClientFactory:
         if self.async_mode:
             assert transport is None or isinstance(transport, httpx2.AsyncBaseTransport)
             assert http_client is None or isinstance(http_client, httpx2.AsyncClient)
-            client = AsyncTypeSafeClient(
+            client = AsyncRuneClient(
                 api_key=api_key,
                 model=model,
                 retry=retry,
@@ -50,7 +55,7 @@ class ClientFactory:
         else:
             assert transport is None or isinstance(transport, httpx2.BaseTransport)
             assert http_client is None or isinstance(http_client, httpx2.Client)
-            client = TypeSafeClient(
+            client = RuneClient(
                 api_key=api_key,
                 model=model,
                 retry=retry,
@@ -69,7 +74,7 @@ async def clients(request: pytest.FixtureRequest) -> AsyncIterator[ClientFactory
     factory = ClientFactory(request.param)
     yield factory
     for client in factory.instances:
-        if isinstance(client, AsyncTypeSafeClient):
+        if isinstance(client, AsyncRuneClient):
             await client.aclose()
         else:
             client.close()
@@ -93,8 +98,8 @@ def live_api_key() -> str:
 @pytest.fixture(params=["sync", "async"])
 async def live_client(request: pytest.FixtureRequest, live_api_key: str) -> AsyncIterator[Client]:
     if request.param == "async":
-        async with AsyncTypeSafeClient(api_key=live_api_key, timeout=120) as client:
+        async with AsyncRuneClient(api_key=live_api_key, timeout=120) as client:
             yield client
     else:
-        with TypeSafeClient(api_key=live_api_key, timeout=120) as client:
+        with RuneClient(api_key=live_api_key, timeout=120) as client:
             yield client

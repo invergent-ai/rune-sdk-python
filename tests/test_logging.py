@@ -5,10 +5,10 @@ import traceback
 import httpx2
 import pytest
 
+from rune_sdk import RetryPolicy, RuneAPIError, RuneError
+from rune_sdk._core.logging import logger, redact_exception, setup_logging
 from tests.conftest import ClientFactory
 from tests.helpers import models
-from typesafe_sdk import RetryPolicy, TypeSafeAPIError, TypeSafeError
-from typesafe_sdk._core.logging import logger, redact_exception, setup_logging
 
 
 @pytest.mark.parametrize("status", [200, 400, 429])
@@ -39,12 +39,12 @@ async def test_secret_headers_redacted(
         attempts += 1
         return httpx2.Response(
             status,
-            json={"models": []} if status == 200 else {"message": "failure"},
+            json={"data": []} if status == 200 else {"message": "failure"},
             headers={header: "response-credential", "x-visible": "response-visible"},
         )
 
     policy = RetryPolicy(backoff_initial=0.001, backoff_max=0.001)
-    with caplog.at_level(logging.DEBUG, logger="typesafe_sdk"):
+    with caplog.at_level(logging.DEBUG, logger="rune_sdk"):
         client = clients(
             handler,
             api_key="auth-credential",
@@ -54,7 +54,7 @@ async def test_secret_headers_redacted(
         if status == 200:
             await models(client)
         else:
-            with pytest.raises(TypeSafeAPIError):
+            with pytest.raises(RuneAPIError):
                 await models(client)
     assert attempts == (3 if status == 429 else 1)
     assert "request-visible" in caplog.text
@@ -104,9 +104,9 @@ async def test_transport_errors_do_not_expose_credentials(
         raise failure
 
     policy = RetryPolicy(backoff_initial=0, backoff_max=0)
-    with caplog.at_level(logging.DEBUG, logger="typesafe_sdk"):
+    with caplog.at_level(logging.DEBUG, logger="rune_sdk"):
         client = clients(handler, api_key=credential, headers={"x-client-secret": "provider-credential"}, retry=policy)
-        with pytest.raises(TypeSafeError) as caught:
+        with pytest.raises(RuneError) as caught:
             await models(client)
         error = caught.value
         logger.error("Request failed", exc_info=(type(error), error, error.__traceback__))
@@ -198,9 +198,9 @@ async def test_logger_level_controls_output(
     level: int,
     expected: set[int],
 ) -> None:
-    with caplog.at_level(level, logger="typesafe_sdk"):
-        await models(clients(lambda request: httpx2.Response(200, json={"models": []})))
-    records = [record for record in caplog.records if record.name == "typesafe_sdk"]
+    with caplog.at_level(level, logger="rune_sdk"):
+        await models(clients(lambda request: httpx2.Response(200, json={"data": []})))
+    records = [record for record in caplog.records if record.name == "rune_sdk"]
     assert {record.levelno for record in records} == expected
     if logging.INFO in expected:
         summaries = [record.getMessage() for record in records if record.levelno == logging.INFO]
@@ -224,7 +224,7 @@ def test_setup_logging_from_env(monkeypatch: pytest.MonkeyPatch, value: str, exp
     original = logger.level
     try:
         logger.setLevel(logging.NOTSET)
-        monkeypatch.setenv("TYPESAFE_LOG_LEVEL", value)
+        monkeypatch.setenv("RUNE_LOG_LEVEL", value)
         setup_logging()
         assert logger.level == expected
     finally:

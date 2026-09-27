@@ -1,0 +1,28 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.14']
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          version: '0.12.19'
+      - run: uv sync --locked --dev
+      - run: uv run ruff check .
+      - run: uv run pyrefly check src
+      - run: uv run pytest -m "not integration"
+      - run: uv build
+      - run: uv run --no-project .github/scripts/check_distributions.py dist "$(uv version --short)"

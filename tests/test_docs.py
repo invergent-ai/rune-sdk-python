@@ -10,11 +10,11 @@ from sybil.document import PythonDocStringDocument
 from sybil.evaluators.python import PythonEvaluator
 from sybil.parsers.markdown import CodeBlockParser, PythonCodeBlockParser, SkipParser
 
-import typesafe_sdk
+import rune_sdk
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKDOWN_FILES = [ROOT / "README.md", *sorted((ROOT / "docs").rglob("*.md"))]
-SOURCE_FILES = sorted((ROOT / "src" / "typesafe_sdk").rglob("*.py"))
+SOURCE_FILES = sorted((ROOT / "src" / "rune_sdk").rglob("*.py"))
 
 
 def code_parsers() -> tuple[PythonCodeBlockParser, CodeBlockParser, SkipParser]:
@@ -38,7 +38,7 @@ def test_python_doctests(path: Path) -> None:
     document = PythonDocStringDocument.parse(str(path), *code_parsers())
     # Docstring examples are shown on the documented symbol's own page, so they may reference public
     # names (like the client) without importing them; standalone Markdown pages still import everything.
-    document.namespace.update({export: getattr(typesafe_sdk, export) for export in typesafe_sdk.__all__})
+    document.namespace.update({export: getattr(rune_sdk, export) for export in rune_sdk.__all__})
     for example in document.examples():
         example.evaluate()
     parts = path.relative_to(ROOT / "src").with_suffix("").parts

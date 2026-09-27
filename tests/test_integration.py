@@ -1,13 +1,22 @@
 import pytest
 
+from rune_sdk import (
+    AsyncRuneClient,
+    Choice,
+    ChoiceAnswer,
+    DecisionsResponse,
+    NoulAnswer,
+    Questions,
+    Score,
+    ScoreAnswer,
+)
 from tests.conftest import Client
-from tests.helpers import models, system_one
-from typesafe_sdk import AsyncTypeSafeClient, Choice, ChoiceAnswer, NoulAnswer, Questions, Score, ScoreAnswer, SystemOneResponse
+from tests.helpers import decide, models
 
 pytestmark = pytest.mark.integration
 
 
-class PydanticQuestionsResponse(SystemOneResponse):
+class PydanticQuestionsResponse(DecisionsResponse):
     billing: NoulAnswer
     tone: ChoiceAnswer
     urgency: ScoreAnswer
@@ -18,12 +27,12 @@ async def test_live_models(live_client: Client) -> None:
     assert available
     for model in available:
         assert isinstance(model.name, str)
-        assert isinstance(model.description, str)
-        assert isinstance(model.release_date, str)
+        assert isinstance(model.owned_by, str)
+        assert isinstance(model.created, int)
 
 
 async def test_live_questions(live_client: Client) -> None:
-    result = await system_one(
+    result = await decide(
         live_client,
         state={"subject": "Charged twice this month", "body": "I see two charges of $49. I only have one account. Please fix this ASAP."},
         questions={
@@ -55,10 +64,10 @@ async def test_live_pydantic_response(live_client: Client) -> None:
         "tone": Choice(instructions="What is the customer's tone?", criteria={"calm": None, "frustrated": None, "angry": None}),
         "urgency": Score(instructions="How urgent is this ticket?", criteria=["can wait", "this week", "today"]),
     }
-    if isinstance(live_client, AsyncTypeSafeClient):
-        result = await live_client.system_one(state, questions, response_model=PydanticQuestionsResponse)
+    if isinstance(live_client, AsyncRuneClient):
+        result = await live_client.decide(state, questions, response_model=PydanticQuestionsResponse)
     else:
-        result = live_client.system_one(state, questions, response_model=PydanticQuestionsResponse)
+        result = live_client.decide(state, questions, response_model=PydanticQuestionsResponse)
 
     assert result.billing == result.nouls["billing"]
     assert result.tone == result.choices["tone"]
@@ -66,4 +75,4 @@ async def test_live_pydantic_response(live_client: Client) -> None:
     assert 0 <= result.billing.noul <= 1
     assert result.tone.choice in {"calm", "frustrated", "angry"}
     assert 0 <= result.urgency.score <= 2
-    assert result.request_id
+    assert result.id and result.id.startswith("dec-")

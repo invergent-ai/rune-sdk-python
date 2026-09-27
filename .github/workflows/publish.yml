@@ -20,7 +20,7 @@ permissions: {}
 jobs:
   build:
     name: Build public distributions
-    if: github.repository == 'typesafe-ai/typesafe-sdk-python'
+    if: github.repository == 'invergent-ai/rune-sdk-python'
     runs-on: ubuntu-latest
     permissions:
       contents: read

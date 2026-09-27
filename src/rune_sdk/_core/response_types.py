@@ -1,7 +1,7 @@
-"""Ergonomic answer objects and response metadata, built on the generated wire schemas.
+"""Ergonomic answer objects and response metadata for the Rune API.
 
-The wire models in `typesafe_sdk._schemas.models` mirror the OpenAPI schema. The public answer types
-subclass them, adding immutability and integer-keyed score maps. Because the answer models are tagged,
+The public answer types extend the base models in `rune_sdk._schemas.models`, adding
+reasoning metadata, immutability and integer-keyed score maps. Because the answer models are tagged,
 the public `Answer` union validates by discriminator; per-answer dispatch is kept only to skip answer
 kinds a future API adds without failing the whole response.
 """
@@ -13,43 +13,59 @@ import httpx2
 from pydantic import ConfigDict, Field, ValidationError
 from typing_extensions import Self, override
 
-from typesafe_sdk._core.json import deserialize, serialize
-from typesafe_sdk._core.logging import logger
-from typesafe_sdk._core.schemas.base import Response, Schema, format_error_path, format_path, validation_error
-from typesafe_sdk._schemas import models as wire
+from rune_sdk._core.json import deserialize, serialize
+from rune_sdk._core.logging import logger
+from rune_sdk._core.schemas.base import (
+    Response,
+    Schema,
+    format_error_path,
+    format_path,
+    validation_error,
+)
+from rune_sdk._schemas import models as wire
+
+
+def _is_none(value: object) -> bool:
+    return value is None
 
 
 class NoulAnswer(wire.NoulAnswer):
     """A yes/no answer.
 
-    See the [noul primitive](https://docs.typesafe.ai/primitives/noul) for details.
+    See the [noul primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
     type: Literal["noul"] = "noul"  # pyrefly: ignore[bad-override]
+    thinking: "ThinkingMetadata | None" = Field(default=None, exclude_if=_is_none)
+    """Reasoning metadata, present only when this answer used thinking."""
 
 
 class ChoiceAnswer(wire.ChoiceAnswer):
     """A selected label and its probabilities.
 
-    See the [choice primitive](https://docs.typesafe.ai/primitives/choice) for details.
+    See the [choice primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
     type: Literal["choice"] = "choice"  # pyrefly: ignore[bad-override]
+    thinking: "ThinkingMetadata | None" = Field(default=None, exclude_if=_is_none)
+    """Reasoning metadata, present only when this answer used thinking."""
 
 
 class ScoreAnswer(wire.ScoreAnswer):
     """An expected score with its rubric and probabilities.
 
-    See the [score primitive](https://docs.typesafe.ai/primitives/score) for details.
+    See the [score primitive](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
     type: Literal["score"] = "score"  # pyrefly: ignore[bad-override]
+    thinking: "ThinkingMetadata | None" = Field(default=None, exclude_if=_is_none)
+    """Reasoning metadata, present only when this answer used thinking."""
     # JSON object keys are strings; `dict[int, ...]` tells Pydantic to coerce them to the integer score
     # levels. `Any` (not the recursive JSON value) keeps the nested values decodable.
     legend: dict[int, str | dict[str, Any] | list[Any]]  # pyrefly: ignore[bad-override]
@@ -62,6 +78,18 @@ Answer: TypeAlias = Annotated[NoulAnswer | ChoiceAnswer | ScoreAnswer, Field(dis
 """An answer to a single question, identified by its `type`."""
 
 
+class ThinkingMetadata(Schema):
+    """Details of reasoning used for an uncertain answer."""
+
+    tokens: int
+    closed: bool
+    onepass: Answer
+
+
+for _answer_class in (NoulAnswer, ChoiceAnswer, ScoreAnswer):
+    _answer_class.model_rebuild()
+
+
 class Usage(wire.Usage):
     """Token counts for a request, when reported by the API."""
 
@@ -69,6 +97,10 @@ class Usage(wire.Usage):
 
     input_tokens: int | None = None  # pyrefly: ignore[bad-override]
     """Number of input tokens used, or `None` when the API did not report it."""
+    reasoning_tokens: int | None = Field(default=None, exclude_if=_is_none)
+    """Reasoning tokens used when thinking was requested."""
+    cost: float | None = Field(default=None, exclude_if=_is_none)
+    """Cost reported by the API."""
     output_tokens: int | None = None  # pyrefly: ignore[bad-override]
     """Number of output tokens used, or `None` when the API did not report it."""
 
@@ -76,7 +108,7 @@ class Usage(wire.Usage):
 _ANSWER_TYPES = {"noul", "choice", "score"}
 
 
-def _prepare_system_one_response(response: httpx2.Response, answer_fields: set[str]) -> dict[str, Any]:
+def _prepare_decide_response(response: httpx2.Response, answer_fields: set[str]) -> dict[str, Any]:
     """Validate answers, drop future types, and lift declared answer fields into top-level keys."""
     decoded = deserialize(response.content)
     if not isinstance(decoded, dict):
@@ -96,12 +128,14 @@ def _prepare_system_one_response(response: httpx2.Response, answer_fields: set[s
     return decoded
 
 
-class SystemOneResponse(Response):
+class DecisionsResponse(Response):
     """Answers grouped by question type with model and usage metadata.
 
-    See [System One](https://docs.typesafe.ai/concepts/system-one) for details.
+    See [Decisions](https://github.com/invergent-ai/rune-sdk-python#readme) for details.
     """
 
+    id: str | None = Field(default=None, exclude_if=_is_none)
+    provider: str | None = Field(default=None, exclude_if=_is_none)
     model: str
     """The model used to answer the request."""
     usage: Usage
@@ -127,8 +161,8 @@ class SystemOneResponse(Response):
     @classmethod
     @override
     def _decode(cls, response: httpx2.Response) -> Self:
-        answer_fields = set(cls.model_fields) - set(SystemOneResponse.model_fields)
-        decoded = _prepare_system_one_response(response, answer_fields)
+        answer_fields = set(cls.model_fields) - set(DecisionsResponse.model_fields)
+        decoded = _prepare_decide_response(response, answer_fields)
         try:
             return cls.model_validate_json(serialize(decoded))
         except ValidationError as error:
@@ -140,21 +174,29 @@ class SystemOneResponse(Response):
 
 
 class ModelMetadata(Schema):
-    """Metadata describing a single available model."""
+    """A model returned by the Rune models endpoint."""
 
-    name: str
-    """Model name or alias accepted by a request's model field."""
-    description: str
-    """Human-readable description of the model and its capabilities."""
-    release_date: str
-    """Model release date, formatted as YYYY-MM-DD."""
+    id: str
+    object: Literal["model"] = "model"
+    created: int
+    owned_by: str
+
+    @property
+    def name(self) -> str:
+        """Alias for the model ID accepted by decision requests."""
+        return self.id
 
 
 class ListModelsResponse(Response):
-    """The models available to the account."""
+    """The available models, using the API's standard list envelope."""
 
-    models: tuple[ModelMetadata, ...]
-    """The available models."""
+    object: Literal["list"] | None = Field(default=None, exclude_if=_is_none)
+    data: tuple[ModelMetadata, ...]
+
+    @property
+    def models(self) -> tuple[ModelMetadata, ...]:
+        """Convenient access to the returned models."""
+        return self.data
 
     @classmethod
     @override

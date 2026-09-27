@@ -8,9 +8,8 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from pydantic_core import from_json, to_json
 
-from tests.conftest import ClientFactory
-from typesafe_sdk import (
-    AsyncTypeSafeClient,
+from rune_sdk import (
+    AsyncRuneClient,
     Choice,
     ChoiceModel,
     Noul,
@@ -18,47 +17,39 @@ from typesafe_sdk import (
     NoulModel,
     Question,
     Questions,
+    RuneError,
     Score,
     ScoreModel,
-    TypeSafeError,
 )
-from typesafe_sdk._core.questions import normalize_questions
-from typesafe_sdk._schemas import models as wire
+from rune_sdk._core.questions import normalize_questions
+from rune_sdk._schemas import models as wire
+from tests.conftest import ClientFactory
 
 
-def test_normalization_preserves_objects() -> None:
+def test_normalization_preserves_inputs() -> None:
     questions = {
         "noul": Noul(instructions="Spam?"),
         "choice": Choice(instructions="Tone?", criteria={"calm": None}),
         "score": Score(instructions="Quality?", criteria=["bad", "good"]),
     }
     result = normalize_questions(questions)
-    assert result["noul"] is questions["noul"]
-    assert result["choice"] is questions["choice"]
-    assert result["score"] is questions["score"]
+    assert questions["noul"].criteria is None
+    assert questions["choice"].criteria == {"calm": None}
+    assert questions["score"].criteria == ["bad", "good"]
     assert from_json(to_json(result)) == {
-        "noul": {"type": "noul", "instructions": "Spam?"},
-        "choice": {"type": "choice", "instructions": "Tone?", "criteria": {"calm": None}},
+        "noul": {"type": "noul", "instructions": "Spam?", "criteria": {"true": "true", "false": "false"}},
+        "choice": {"type": "choice", "instructions": "Tone?", "criteria": {"calm": "calm"}},
         "score": {"type": "score", "instructions": "Quality?", "criteria": ["bad", "good"]},
     }
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [
-        {"type": "noul", "instructions": "Spam?", "weight": 3, "criteria": {"future": "kept"}},
-        {"type": "future", "nested": {"k": None}},
-        {"type": "score", "criteria": ["good"], "weight": 3},
-    ],
-)
-def test_normalization_preserves_raw_questions(raw: dict[str, Any]) -> None:
+def test_normalization_preserves_unknown_fields_and_copies_raw_inputs() -> None:
+    raw = {"type": "future", "nested": {"k": None}}
     before = copy.deepcopy(raw)
-    questions = cast(Questions, {"raw": raw, "typed": Noul(instructions="Spam?")})
-    result = normalize_questions(questions)
-    assert isinstance(result["typed"], wire.NoulQuestion)
-    assert from_json(to_json(result)) == {"raw": raw, "typed": {"type": "noul", "instructions": "Spam?"}}
+    result = normalize_questions(cast(Questions, {"raw": raw}))
+    assert result == {"raw": raw}
     assert raw == before
-    assert result["raw"] is raw
+    assert result["raw"] is not raw
 
 
 @pytest.mark.parametrize(
@@ -77,7 +68,7 @@ def test_normalization_preserves_raw_questions(raw: dict[str, Any]) -> None:
     ],
 )
 def test_raw_questions_require_structural_keys(invalid: object) -> None:
-    with pytest.raises(TypeSafeError, match='Question "invalid"'):
+    with pytest.raises(RuneError, match='Question "invalid"'):
         normalize_questions(cast(Questions, {"invalid": invalid}))
 
 
@@ -86,7 +77,7 @@ def test_raw_questions_require_structural_keys(invalid: object) -> None:
     [
         (Noul(), {"type": "noul"}),
         (Choice(criteria={"a": None}), {"type": "choice", "criteria": {"a": None}}),
-        (Score(criteria=["good"]), {"type": "score", "criteria": ["good"]}),
+        (Score(criteria=["bad", "good"]), {"type": "score", "criteria": ["bad", "good"]}),
         (Noul(instructions="", criteria={}), {"type": "noul", "instructions": "", "criteria": {}}),
         (Noul(instructions=[], criteria={"true": None}), {"type": "noul", "instructions": [], "criteria": {"true": None}}),
     ],
@@ -99,7 +90,7 @@ def test_direct_encoding_omits_only_default_fields(question: Noul | Choice | Sco
 def test_discriminators_are_automatic() -> None:
     noul = Noul(instructions="Spam?")
     choice = Choice(instructions="Tone?", criteria={"calm": None})
-    score = Score(instructions="Quality?", criteria=["good"])
+    score = Score(instructions="Quality?", criteria=["bad", "good"])
     for question, wire_type, tag in (
         (noul, wire.NoulQuestion, "noul"),
         (choice, wire.ChoiceQuestion, "choice"),
@@ -128,7 +119,7 @@ def test_invalid_typed_question_is_rejected_on_construction() -> None:
     [
         (Noul, {}),
         (Choice, {"criteria": {"a": None}}),
-        (Score, {"criteria": ["good"]}),
+        (Score, {"criteria": ["bad", "good"]}),
     ],
 )
 def test_typed_questions_reject_unknown_fields(question_type: Any, kwargs: dict[str, Any]) -> None:
@@ -157,6 +148,7 @@ def test_optional_noul_criteria(raw: bool, criteria: NoulCriteria | None) -> Non
         question = expected.copy()
     else:
         question = Noul(instructions="Spam?", criteria=criteria)
+    expected["criteria"] = {"true": (criteria or {}).get("true", "true"), "false": (criteria or {}).get("false", "false")}
     assert from_json(to_json(normalize_questions({"q": question}))) == {"q": expected}
 
 
@@ -170,17 +162,17 @@ def test_typed_noul_criteria_reject_unknown_fields() -> None:
 def test_empty_score_criteria_is_rejected(raw: bool) -> None:
     model = cast(ScoreModel, {"type": "score", "instructions": "Quality?", "criteria": []})
     question = model if raw else Score(instructions=model["instructions"], criteria=model["criteria"])
-    with pytest.raises(TypeSafeError, match='"rating" has no criteria'):
+    with pytest.raises(RuneError, match='"rating" has fewer than two criteria'):
         normalize_questions({"rating": question})
 
 
 async def test_covariant_question_mappings(clients: ClientFactory) -> None:
     nouls = {"q": Noul(instructions="Spam?")}
     choices = {"q": Choice(instructions="Tone?", criteria={"calm": None})}
-    scores = {"q": Score(instructions="Quality?", criteria=["good"])}
+    scores = {"q": Score(instructions="Quality?", criteria=["bad", "good"])}
     raw_nouls: dict[str, NoulModel] = {"q": {"type": "noul", "instructions": "Spam?"}}
     raw_choices: dict[str, ChoiceModel] = {"q": {"type": "choice", "instructions": "Tone?", "criteria": {"calm": None}}}
-    raw_scores: dict[str, ScoreModel] = {"q": {"type": "score", "instructions": "Quality?", "criteria": ["good"]}}
+    raw_scores: dict[str, ScoreModel] = {"q": {"type": "score", "instructions": "Quality?", "criteria": ["bad", "good"]}}
     read_only: Mapping[str, Choice] = MappingProxyType(choices)
     mixed: Questions = {"one": nouls["q"], "two": raw_choices["q"], "three": scores["q"]}
     calls = 0
@@ -189,30 +181,30 @@ async def test_covariant_question_mappings(clients: ClientFactory) -> None:
         nonlocal calls
         calls += 1
         assert from_json(request.content)["questions"]
-        return httpx2.Response(200, json={"model": "jev-latest", "usage": {}, "answers": {}})
+        return httpx2.Response(200, json={"model": "rune-v3", "usage": {}, "answers": {}})
 
     client = clients(handler)
-    if isinstance(client, AsyncTypeSafeClient):
-        await client.system_one("x", nouls)
-        await client.system_one("x", choices)
-        await client.system_one("x", scores)
-        await client.system_one("x", raw_nouls)
-        await client.system_one("x", raw_choices)
-        await client.system_one("x", raw_scores)
-        await client.system_one("x", read_only)
-        await client.system_one("x", mixed)
-        await client.system_one("x", {"q": {"type": "choice", "instructions": "Tone?", "criteria": {"calm": None}}})
+    if isinstance(client, AsyncRuneClient):
+        await client.decide("x", nouls)
+        await client.decide("x", choices)
+        await client.decide("x", scores)
+        await client.decide("x", raw_nouls)
+        await client.decide("x", raw_choices)
+        await client.decide("x", raw_scores)
+        await client.decide("x", read_only)
+        await client.decide("x", mixed)
+        await client.decide("x", {"q": {"type": "choice", "instructions": "Tone?", "criteria": {"calm": None}}})
     else:
-        client.system_one("x", nouls)
-        client.system_one("x", choices)
-        client.system_one("x", scores)
-        client.system_one("x", raw_nouls)
-        client.system_one("x", raw_choices)
-        client.system_one("x", raw_scores)
-        client.system_one("x", read_only)
-        client.system_one("x", mixed)
-        client.system_one("x", {"q": {"type": "choice", "instructions": "Tone?", "criteria": {"calm": None}}})
+        client.decide("x", nouls)
+        client.decide("x", choices)
+        client.decide("x", scores)
+        client.decide("x", raw_nouls)
+        client.decide("x", raw_choices)
+        client.decide("x", raw_scores)
+        client.decide("x", read_only)
+        client.decide("x", mixed)
+        client.decide("x", {"q": {"type": "choice", "instructions": "Tone?", "criteria": {"calm": None}}})
     assert calls == 9
-    assert scores["q"].criteria == ["good"]
-    assert raw_scores["q"]["criteria"] == ["good"]
+    assert scores["q"].criteria == ["bad", "good"]
+    assert raw_scores["q"]["criteria"] == ["bad", "good"]
     assert read_only["q"] is choices["q"]
