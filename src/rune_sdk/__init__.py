@@ -1,4 +1,4 @@
-"""Python clients and public types for Invergent Rune."""
+"""Python clients and public types for Surogate Rune."""
 
 from rune_sdk import _core as _core
 from rune_sdk import constants as constants
